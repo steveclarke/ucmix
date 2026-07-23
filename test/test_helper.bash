@@ -11,6 +11,10 @@ SEED_FIXTURE="${UCMIX_ROOT}/testdata/seed.json"
 # start_fakeboard launches a fakeboard seeded from the fixture and exports
 # UCMIX_HOST with the address it prints. Sets FAKE_PID and FAKE_DIR.
 start_fakeboard() {
+  if [ ! -x "${FAKEBOARD_BIN}" ]; then
+    echo "fakeboard binary not found at ${FAKEBOARD_BIN} — run 'just test-e2e' (it builds it)" >&2
+    return 1
+  fi
   FAKE_DIR="$(mktemp -d)"
   local addr_file="${FAKE_DIR}/addr"
   "${FAKEBOARD_BIN}" --seed "${SEED_FIXTURE}" >"${addr_file}" 2>"${FAKE_DIR}/err" &
@@ -23,6 +27,11 @@ start_fakeboard() {
   done
   UCMIX_HOST="$(head -n1 "${addr_file}")"
   export UCMIX_HOST
+  if [ -z "${UCMIX_HOST}" ]; then
+    echo "fakeboard did not report an address; stderr:" >&2
+    cat "${FAKE_DIR}/err" >&2
+    return 1
+  fi
 }
 
 # stop_fakeboard kills the fakeboard and cleans its temp dir.

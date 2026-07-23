@@ -47,8 +47,10 @@ jobs:
           go-version: stable
       - name: Install BATS
         run: sudo apt-get update && sudo apt-get install -y bats
-      - name: Build binary
-        run: go build -ldflags "-X github.com/steveclarke/ucmix/internal/cli.version=test" -o dist/ucmix ./cmd/ucmix
+      - name: Build binaries
+        run: |
+          go build -ldflags "-X github.com/steveclarke/ucmix/internal/cli.version=test" -o dist/ucmix ./cmd/ucmix
+          go build -o dist/fakeboard ./cmd/fakeboard
       - name: Run E2E tests
         run: bats test/
 
