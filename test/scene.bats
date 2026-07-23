@@ -1,0 +1,71 @@
+#!/usr/bin/env bats
+# End-to-end coverage for scene commands: store, recall, reset, ls.
+
+load test_helper
+
+@test "store then recall a scene" {
+  run "${UCMIX_BIN}" store proj1 sceneA
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stored proj1 / sceneA"* ]]
+
+  run "${UCMIX_BIN}" recall proj1 sceneA
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"recalled proj1 / sceneA"* ]]
+}
+
+@test "recall --json emits an envelope" {
+  run "${UCMIX_BIN}" recall proj1 sceneA --json
+  [ "$status" -eq 0 ]
+  echo "$output" | json_valid
+  [[ "$output" == *"\"action\""* ]]
+  [[ "$output" == *"recall"* ]]
+}
+
+@test "ls projects lists stored presets" {
+  "${UCMIX_BIN}" store proj1 sceneA
+  run "${UCMIX_BIN}" ls projects
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"proj1"* ]]
+}
+
+@test "ls projects --json is valid JSON" {
+  "${UCMIX_BIN}" store proj1 sceneA
+  run "${UCMIX_BIN}" ls projects --json
+  [ "$status" -eq 0 ]
+  echo "$output" | json_valid
+  [[ "$output" == *"\"projects\""* ]]
+}
+
+@test "ls scenes states the missing-lister gap" {
+  "${UCMIX_BIN}" store proj1 sceneA
+  run "${UCMIX_BIN}" ls scenes proj1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no per-project scene lister"* ]]
+}
+
+@test "reset without --yes refuses in a non-tty" {
+  run "${UCMIX_BIN}" reset </dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"destructive"* ]]
+  [[ "$output" == *"--yes"* ]]
+}
+
+@test "reset --yes proceeds" {
+  run "${UCMIX_BIN}" reset --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"reset mixer"* ]]
+}
+
+@test "reset --yes --json emits an envelope" {
+  run "${UCMIX_BIN}" reset --yes --json
+  [ "$status" -eq 0 ]
+  echo "$output" | json_valid
+  [[ "$output" == *"\"action\""* ]]
+  [[ "$output" == *"reset"* ]]
+}
+
+@test "reset --scene --yes resets only the scene scope" {
+  run "${UCMIX_BIN}" reset --scene --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"scene"* ]]
+}

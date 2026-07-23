@@ -1,0 +1,11 @@
+{
+  "global/mixer_name": "TestBoard",
+  "line/ch1/username": "Kick",
+  "line/ch1/mute": 0.0,
+  "line/ch1/volume": 0.746,
+  "line/ch2/username": "Snare",
+  "line/ch2/mute": 1.0,
+  "line/ch3/username": "Vocal",
+  "line/ch3/mute": 0.0,
+  "main/ch1/volume": 0.746
+}
