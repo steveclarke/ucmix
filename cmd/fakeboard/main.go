@@ -37,6 +37,13 @@ func main() {
 	}
 
 	b := fakeboard.New(seed)
+	// FAKEBOARD_VOLUME_READ_SCALE makes the ZB snapshot surface */volume keys
+	// ×100, faithful to the real board's read quirk. Off by default so the
+	// read/write suites see raw 0..1 positions; the apply/verify round-trip
+	// suite turns it on to exercise the read-scale seam end to end.
+	if os.Getenv("FAKEBOARD_VOLUME_READ_SCALE") != "" {
+		b.VolumeReadScale = true
+	}
 	addr, err := b.Start()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fakeboard: start: %v\n", err)

@@ -83,6 +83,8 @@ func newRootCmd() *cobra.Command {
 		newDumpCmd(g),
 		newGetCmd(g),
 		newSetCmd(g),
+		newVerifyCmd(g),
+		newApplyCmd(g),
 		newRecallCmd(g),
 		newStoreCmd(g),
 		newResetCmd(g),
@@ -91,22 +93,53 @@ func newRootCmd() *cobra.Command {
 	return root
 }
 
+// exitError carries an explicit process exit code out of a command. verify and
+// apply use it to distinguish clean (0), drift found (1), and error (2); the
+// inner err (if any) is rendered by Execute, a nil err exits silently with the
+// code. Other commands keep returning plain errors, which Execute maps to 1.
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string {
+	if e.err != nil {
+		return e.err.Error()
+	}
+	return ""
+}
+
+func (e *exitError) Unwrap() error { return e.err }
+
 // Execute runs the CLI. A CLIError is rendered specially: the Message on one
-// line and the Hint dimmed below it. Any other error prints its text. Both exit
-// non-zero.
+// line and the Hint dimmed below it. Any other error prints its text. The
+// process exit code is 1 by default; a command that returns an *exitError sets
+// it explicitly (verify/apply use 1 for drift, 2 for errors), and a nil inner
+// error exits silently with that code.
 func Execute() {
-	if err := newRootCmd().Execute(); err != nil {
+	err := newRootCmd().Execute()
+	if err == nil {
+		return
+	}
+	code := 1
+	inner := err
+	var ee *exitError
+	if errors.As(err, &ee) {
+		code = ee.code
+		inner = ee.err
+	}
+	if inner != nil {
 		var ce errs.CLIError
-		if errors.As(err, &ce) {
+		if errors.As(inner, &ce) {
 			fmt.Fprintln(os.Stderr, ui.ErrorLine(ce.Message))
 			if ce.Hint != "" {
 				fmt.Fprintln(os.Stderr, ui.Hint(ce.Hint))
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, ui.ErrorLine(err.Error()))
+			fmt.Fprintln(os.Stderr, ui.ErrorLine(inner.Error()))
 		}
-		os.Exit(1)
 	}
+	os.Exit(code)
 }
 
 // normalizePath translates a dotted path (line.ch1.mute) to the wire form

@@ -1,0 +1,24 @@
+# Synthetic board-as-code fixture for the apply/verify/dump round-trip tests.
+# Generic names only — no real board or venue data. Exercises the five traps
+# the phase-7 tests care about: a fader (the ×100 read-scale trap), a monitor
+# send (resolved by mix name), a stereo link, a limiter, and name strings.
+version: 1
+
+channels:
+  1:
+    name: "Vocals"
+    link: true        # stereo link (odd channel = pair master)
+    fader: -6         # volume: the read-scale trap (-6 dB -> wire 0.746 -> reads 74.6)
+    mute: false
+    sends:
+      Wedges: -3      # send resolved by mix name -> aux5
+
+mixes:
+  5:
+    name: "Wedges"
+    stereo: true      # link (odd mix = pair master)
+    fader: -6
+    limiter:
+      on: true
+      threshold: -12
+      release: 400
