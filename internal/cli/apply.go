@@ -64,6 +64,14 @@ func newApplyCmd(g *globals) *cobra.Command {
 				}
 			}
 			written, werr := writeDesired(ctx, ca, desired, g)
+			if werr == nil {
+				// Write barrier: a round-trip on A forces the board's sequential
+				// per-connection reader to consume every write frame before we
+				// close A. Without it, closing A races delivery of the last
+				// frames and the tail of the burst is silently lost (surfaced as
+				// absent keys on slow CI runners).
+				_, _ = ca.ListProjects(ctx)
+			}
 			_ = ca.Close()
 			if werr != nil {
 				return &exitError{code: 2, err: errs.CLIError{
