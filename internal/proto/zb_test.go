@@ -147,6 +147,55 @@ func TestParseZBRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBuildZBRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		flat map[string]any
+	}{
+		{"empty", map[string]any{}},
+		{"single scalar", map[string]any{"count": 5}},
+		{"nested objects", map[string]any{
+			"line/ch1/mute":     float64(1.0),
+			"line/ch1/volume":   float64(0.75),
+			"line/ch1/name":     "Kick",
+			"line/ch10/mute":    float64(0.0),
+			"global/samplerate": 48000,
+		}},
+		{"all scalar kinds", map[string]any{
+			"f":  float64(0.5),      // -> d  -> float64
+			"i":  -3,                // -> i  -> int
+			"u":  200,               // -> U  -> int
+			"l":  70000,             // -> l  -> int
+			"ll": int64(5000000000), // -> L -> int64
+			"s":  "Main",            // -> S  -> string
+		}},
+		{"array leaf", map[string]any{
+			"arr": []any{1, 2, 200, "x"},
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			blob, err := BuildZB(tc.flat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := ParseZB(blob)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.flat) {
+				t.Fatalf("round trip =\n%#v\nwant\n%#v", got, tc.flat)
+			}
+		})
+	}
+}
+
+func TestBuildZBRejectsBadKind(t *testing.T) {
+	if _, err := BuildZB(map[string]any{"b": true}); err == nil {
+		t.Fatal("expected error encoding bool")
+	}
+}
+
 func TestParseZBMalformedZlib(t *testing.T) {
 	if _, err := ParseZB([]byte{0x00, 0x01, 0x02, 0x03}); err == nil {
 		t.Fatal("expected zlib error")
