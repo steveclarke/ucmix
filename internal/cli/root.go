@@ -1,13 +1,25 @@
 // Package cli wires the ucmix cobra command tree. Commands use constructor
 // style (newXxxCmd) with no package-level command globals; they stay thin and
-// delegate to the internal packages.
+// delegate to the internal packages. Shared connect logic and the global flags
+// (--host, --json, --no-color) hang off a per-invocation globals value passed to
+// each subcommand constructor.
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveclarke/ucmix/internal/config"
+	"github.com/steveclarke/ucmix/internal/errs"
+	"github.com/steveclarke/ucmix/internal/ui"
+
+	ucmix "github.com/steveclarke/ucmix"
 )
 
 // Build-time version info, injected via -ldflags.
@@ -17,23 +29,95 @@ var (
 	date    = "unknown"
 )
 
-// newRootCmd builds the root command. Subcommands are wired here as they are
-// implemented.
+// connectTimeout bounds the handshake wait so a wrong/unreachable host fails
+// with a hint instead of hanging.
+const connectTimeout = 5 * time.Second
+
+// globals carries the root's persistent-flag values and the shared connect
+// helper. One value is built per invocation in newRootCmd and threaded into each
+// subcommand constructor — no package-level command state.
+type globals struct {
+	host    string
+	json    bool
+	noColor bool
+}
+
+// dialClient resolves the mixer host (flag > UCMIX_HOST > config file) and opens
+// a connection. Connect failures come back as an errs.CLIError with a hint.
+func (g *globals) dialClient(ctx context.Context) (*ucmix.Client, error) {
+	addr, err := config.ResolveHost(g.host)
+	if err != nil {
+		return nil, err
+	}
+	dctx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	c, err := ucmix.Connect(dctx, addr)
+	if err != nil {
+		return nil, errs.CLIError{
+			Message: fmt.Sprintf("could not connect to mixer at %s: %v", addr, err),
+			Hint:    "check --host or UCMIX_HOST; is the mixer reachable?",
+		}
+	}
+	return c, nil
+}
+
+// newRootCmd builds the root command and wires every subcommand.
 func newRootCmd() *cobra.Command {
+	g := &globals{}
 	root := &cobra.Command{
 		Use:           "ucmix",
 		Short:         "Control PreSonus StudioLive mixers over UCNET",
 		Version:       fmt.Sprintf("%s (%s, %s)", version, commit, date),
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRun: func(_ *cobra.Command, _ []string) {
+			ui.Init(g.noColor)
+		},
 	}
+	pf := root.PersistentFlags()
+	pf.StringVar(&g.host, "host", "", "mixer host[:port] (overrides UCMIX_HOST and config file)")
+	pf.BoolVar(&g.json, "json", false, "emit machine-readable JSON")
+	pf.BoolVar(&g.noColor, "no-color", false, "disable colored output")
+
+	root.AddCommand(
+		newDumpCmd(g),
+		newGetCmd(g),
+		newSetCmd(g),
+		newRecallCmd(g),
+		newStoreCmd(g),
+		newResetCmd(g),
+		newLsCmd(g),
+	)
 	return root
 }
 
-// Execute runs the CLI and handles top-level error display.
+// Execute runs the CLI. A CLIError is rendered specially: the Message on one
+// line and the Hint dimmed below it. Any other error prints its text. Both exit
+// non-zero.
 func Execute() {
 	if err := newRootCmd().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		var ce errs.CLIError
+		if errors.As(err, &ce) {
+			fmt.Fprintln(os.Stderr, ui.ErrorLine(ce.Message))
+			if ce.Hint != "" {
+				fmt.Fprintln(os.Stderr, ui.Hint(ce.Hint))
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, ui.ErrorLine(err.Error()))
+		}
 		os.Exit(1)
 	}
+}
+
+// normalizePath translates a dotted path (line.ch1.mute) to the wire form
+// (line/ch1/mute). Paths already using slashes pass through unchanged.
+func normalizePath(p string) string {
+	return strings.ReplaceAll(p, ".", "/")
+}
+
+// printJSON writes v as indented JSON to stdout followed by a newline.
+func printJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }

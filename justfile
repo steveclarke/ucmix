@@ -30,6 +30,7 @@ test-race:
 
 # Build the binary and run the BATS end-to-end suite
 test-e2e: build
+    go build -o dist/fakeboard ./cmd/fakeboard
     bats test/
 
 # Run unit + e2e tests
