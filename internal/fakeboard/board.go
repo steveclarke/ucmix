@@ -108,11 +108,11 @@ func (b *Board) Close() error {
 	b.closeOnce.Do(func() {
 		close(b.done)
 		if b.ln != nil {
-			b.ln.Close()
+			_ = b.ln.Close()
 		}
 		b.mu.Lock()
 		for c := range b.conns {
-			c.nc.Close()
+			_ = c.nc.Close()
 		}
 		b.mu.Unlock()
 		b.wg.Wait()
@@ -145,7 +145,7 @@ func (b *Board) acceptLoop() {
 func (b *Board) serve(c *conn) {
 	defer b.wg.Done()
 	defer b.removeConn(c)
-	defer c.nc.Close()
+	defer func() { _ = c.nc.Close() }()
 
 	r := bufio.NewReader(c.nc)
 	received := 0
@@ -230,7 +230,7 @@ func (b *Board) handleJM(c *conn, f proto.Frame) {
 		b.subscribe(c)
 	case "ResetMixer":
 		var cmd proto.ResetMixerCmd
-		json.Unmarshal(body, &cmd)
+		_ = json.Unmarshal(body, &cmd)
 		if cmd.ResetScene != 0 || cmd.ResetProject != 0 {
 			b.tree.LoadSnapshot(factoryTree())
 			b.pushZBToAll()
@@ -239,13 +239,13 @@ func (b *Board) handleJM(c *conn, f proto.Frame) {
 		var cmd struct {
 			PresetFile string `json:"presetFile"`
 		}
-		json.Unmarshal(body, &cmd)
+		_ = json.Unmarshal(body, &cmd)
 		b.restorePreset(cmd.PresetFile)
 	case "StorePreset":
 		var cmd struct {
 			PresetFile string `json:"presetFile"`
 		}
-		json.Unmarshal(body, &cmd)
+		_ = json.Unmarshal(body, &cmd)
 		b.storePreset(cmd.PresetFile)
 	case "Listpresets":
 		b.listPresets(c)
@@ -343,7 +343,7 @@ func (b *Board) buildZBFrame() []byte {
 // the peer already closed) are ignored.
 func (c *conn) write(b []byte) {
 	c.writeMu.Lock()
-	c.nc.Write(b)
+	_, _ = c.nc.Write(b)
 	c.writeMu.Unlock()
 }
 
@@ -357,7 +357,7 @@ func (c *conn) sendDelta(staleAfter int, wire []byte) {
 		return
 	}
 	c.deltasSent++
-	c.nc.Write(wire)
+	_, _ = c.nc.Write(wire)
 }
 
 // jmID extracts the "id" field from a JM payload (4-byte LE length prefix +
@@ -370,7 +370,7 @@ func jmID(payload []byte) (string, []byte) {
 	var probe struct {
 		ID string `json:"id"`
 	}
-	json.Unmarshal(body, &probe)
+	_ = json.Unmarshal(body, &probe)
 	return probe.ID, body
 }
 

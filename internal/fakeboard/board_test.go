@@ -170,7 +170,7 @@ func TestStorePresetThenRestore(t *testing.T) {
 	// Change the tree.
 	c.send(t, proto.Frame{Code: proto.CodePS, Payload: proto.MarshalPS("line/ch1/name", "Changed")})
 	// Give the board a moment to apply (single conn, no echo to read).
-	waitFor(t, func() bool { v, _ := b.Snapshot()["line/ch1/name"]; return v == "Changed" })
+	waitFor(t, func() bool { return b.Snapshot()["line/ch1/name"] == "Changed" })
 
 	// Restore the stored scene → pushes a fresh ZB.
 	c.send(t, proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(proto.RestorePresetCmd{PresetFile: "scene-a"})})
