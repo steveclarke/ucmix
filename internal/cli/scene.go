@@ -17,9 +17,10 @@ import (
 // board replies with a fresh snapshot the client loads.
 func newRecallCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
-		Use:   "recall <project> <scene>",
-		Short: "Recall a stored scene",
-		Args:  cobra.ExactArgs(2),
+		Use:     "recall <project> <scene>",
+		Short:   "Recall a stored scene",
+		Example: `  ucmix recall "Main Live" "Opening"`,
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, scene := args[0], args[1]
 			c, err := g.dialClient(cmd.Context())
@@ -44,9 +45,10 @@ func newRecallCmd(g *globals) *cobra.Command {
 // a scene under (project, scene).
 func newStoreCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
-		Use:   "store <project> <scene>",
-		Short: "Store the current state as a scene",
-		Args:  cobra.ExactArgs(2),
+		Use:     "store <project> <scene>",
+		Short:   "Store the current state as a scene",
+		Example: `  ucmix store "Main Live" "Opening"`,
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, scene := args[0], args[1]
 			c, err := g.dialClient(cmd.Context())

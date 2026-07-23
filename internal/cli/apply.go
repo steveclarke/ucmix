@@ -27,7 +27,10 @@ func newApplyCmd(g *globals) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply <config.yml>",
 		Short: "Write a config to the board, then verify",
-		Args:  cobra.ExactArgs(1),
+		Example: `  ucmix apply board.yml
+  ucmix apply board.yml --dry-run
+  ucmix apply board.yml --reset --yes`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			desired, err := loadAndCompile(args[0])
 			if err != nil {

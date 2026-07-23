@@ -60,7 +60,7 @@ func newLsProjectsCmd(g *globals) *cobra.Command {
 func newLsScenesCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "scenes <project>",
-		Short: "List scenes (no dedicated lister — see note)",
+		Short: "List presets for a project (no per-project scene lister yet)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project := args[0]

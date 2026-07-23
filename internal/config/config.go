@@ -1,8 +1,11 @@
-// Package config resolves the mixer host address the CLI connects to. The
-// resolution order is: the --host flag, then the UCMIX_HOST environment
-// variable, then a config file (~/.config/ucmix/config.yml with an optional
-// config.local.yml deep-merged over it), and finally an error. It also fills in
-// the default UCNET port when a resolved host carries none.
+// Package config resolves the mixer host address the CLI connects to and
+// manages saved connection profiles. Resolution order is: the --host flag, then
+// a named --profile, then the UCMIX_HOST environment variable, then the current
+// profile in the config file, then a legacy top-level host: key, and finally an
+// error. The config file is ~/.config/ucmix/config.yml with an optional
+// config.local.yml deep-merged over it. Profile mutations are written back to
+// config.yml, preserving its comments and unknown keys. A resolved host with no
+// explicit port gets the default UCNET port.
 package config
 
 import (
@@ -10,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/steveclarke/ucmix/internal/errs"
@@ -20,7 +24,7 @@ import (
 // is appended to a resolved host that has no explicit port.
 const DefaultPort = "53000"
 
-// EnvHost is the environment variable checked after the --host flag.
+// EnvHost is the environment variable checked after --host and --profile.
 const EnvHost = "UCMIX_HOST"
 
 // File is the config resolver's view of the filesystem and environment. The
@@ -32,32 +36,78 @@ type File struct {
 	ConfigDir string
 }
 
-// ResolveHost returns the mixer address using the documented precedence:
-// flagHost > UCMIX_HOST > config file host > error. The returned address always
-// includes a port (DefaultPort is appended when none is present).
-func (f File) ResolveHost(flagHost string) (string, error) {
-	if h := strings.TrimSpace(flagHost); h != "" {
-		return withPort(h), nil
+// Profile is one saved mixer target. Only the host is stored today; the struct
+// leaves room for per-profile settings later without a breaking change.
+type Profile struct {
+	Host string `yaml:"host"`
+}
+
+// Resolve returns the mixer address using the documented precedence:
+// flagHost > flagProfile > UCMIX_HOST > current profile > legacy host: > error.
+// The returned address always includes a port (DefaultPort is appended when
+// none is present). Passing both flagHost and flagProfile is an error.
+func (f File) Resolve(flagHost, flagProfile string) (string, error) {
+	flagHost = strings.TrimSpace(flagHost)
+	flagProfile = strings.TrimSpace(flagProfile)
+	if flagHost != "" && flagProfile != "" {
+		return "", errs.CLIError{
+			Message: "--host and --profile are mutually exclusive",
+			Hint:    "pass a literal address with --host, or a saved profile with --profile, not both",
+		}
 	}
-	if h := strings.TrimSpace(f.getenv(EnvHost)); h != "" {
-		return withPort(h), nil
+	if flagHost != "" {
+		return withPort(flagHost), nil
 	}
+
 	cfg, err := f.loadConfig()
 	if err != nil {
 		return "", err
 	}
+
+	if flagProfile != "" {
+		p, ok := cfg.Profiles[flagProfile]
+		if !ok {
+			return "", errs.CLIError{
+				Message: fmt.Sprintf("no profile named %q", flagProfile),
+				Hint:    "list profiles with `ucmix profile ls`",
+			}
+		}
+		if h := strings.TrimSpace(p.Host); h != "" {
+			return withPort(h), nil
+		}
+		return "", errs.CLIError{Message: fmt.Sprintf("profile %q has no host", flagProfile)}
+	}
+
+	if h := strings.TrimSpace(f.getenv(EnvHost)); h != "" {
+		return withPort(h), nil
+	}
+
+	if cur := strings.TrimSpace(cfg.Current); cur != "" {
+		p, ok := cfg.Profiles[cur]
+		if !ok {
+			return "", errs.CLIError{
+				Message: fmt.Sprintf("current profile %q does not exist", cur),
+				Hint:    "set a valid current profile with `ucmix profile use <name>`",
+			}
+		}
+		if h := strings.TrimSpace(p.Host); h != "" {
+			return withPort(h), nil
+		}
+	}
+
 	if h := strings.TrimSpace(cfg.Host); h != "" {
 		return withPort(h), nil
 	}
+
 	return "", errs.CLIError{
 		Message: "no mixer host configured",
-		Hint:    "set --host, the UCMIX_HOST env var, or a host: in ~/.config/ucmix/config.yml",
+		Hint:    "run `ucmix setup` to find a mixer, add one with `ucmix profile add`, or set --host / UCMIX_HOST",
 	}
 }
 
-// ResolveHost resolves against the real OS environment and config directory.
-func ResolveHost(flagHost string) (string, error) {
-	return File{}.ResolveHost(flagHost)
+// Resolve resolves against the real OS environment and config directory.
+func Resolve(flagHost, flagProfile string) (string, error) {
+	return File{}.Resolve(flagHost, flagProfile)
 }
 
 func (f File) getenv(key string) string {
@@ -67,46 +117,71 @@ func (f File) getenv(key string) string {
 	return os.Getenv(key)
 }
 
-// settings is the subset of the config file the CLI reads.
-type settings struct {
-	Host string `yaml:"host"`
+// Config is the merged view of the config files: the legacy top-level host, the
+// current-profile pointer, and the named profiles.
+type Config struct {
+	Host     string             `yaml:"host,omitempty"`
+	Current  string             `yaml:"current,omitempty"`
+	Profiles map[string]Profile `yaml:"profiles,omitempty"`
 }
 
+// Load returns the merged config (config.yml overlaid with config.local.yml).
+func (f File) Load() (Config, error) { return f.loadConfig() }
+
 // loadConfig reads config.yml and, if present, deep-merges config.local.yml over
-// it. A missing base file is not an error (it just yields empty settings); a
+// it. A missing base file is not an error (it yields an empty Config); a
 // present-but-unreadable or malformed file is.
-func (f File) loadConfig() (settings, error) {
+func (f File) loadConfig() (Config, error) {
 	dir := f.configDir()
 	base, err := readYAML(filepath.Join(dir, "config.yml"))
 	if err != nil {
-		return settings{}, err
+		return Config{}, err
 	}
 	local, err := readYAML(filepath.Join(dir, "config.local.yml"))
 	if err != nil {
-		return settings{}, err
+		return Config{}, err
 	}
 	merged := deepMerge(base, local)
 
-	var out settings
+	var out Config
 	// Re-encode the merged map and decode into the typed struct so field
 	// mapping stays in one place (the yaml tags above).
 	blob, err := yaml.Marshal(merged)
 	if err != nil {
-		return settings{}, fmt.Errorf("config: re-encoding merged config: %w", err)
+		return Config{}, fmt.Errorf("config: re-encoding merged config: %w", err)
 	}
 	if err := yaml.Unmarshal(blob, &out); err != nil {
-		return settings{}, fmt.Errorf("config: decoding merged config: %w", err)
+		return Config{}, fmt.Errorf("config: decoding merged config: %w", err)
 	}
 	return out, nil
 }
 
-// configDir returns the directory holding the config files.
+// ProfileNames returns the saved profile names in sorted order.
+func (c Config) ProfileNames() []string {
+	names := make([]string, 0, len(c.Profiles))
+	for n := range c.Profiles {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Path returns the path to the primary config file (config.yml), whether or not
+// it exists yet. Profile mutations and `config path`/`config edit` use it.
+func (f File) Path() string {
+	return filepath.Join(f.configDir(), "config.yml")
+}
+
+// configDir returns the directory holding the config files. It honors
+// XDG_CONFIG_HOME and otherwise uses ~/.config/ucmix on every platform, matching
+// the path every hint and doc names (os.UserConfigDir would point at
+// ~/Library/Application Support on macOS, which the docs do not mention).
 func (f File) configDir() string {
 	if f.ConfigDir != "" {
 		return f.ConfigDir
 	}
-	if base, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(base, "ucmix")
+	if xdg := strings.TrimSpace(f.getenv("XDG_CONFIG_HOME")); xdg != "" {
+		return filepath.Join(xdg, "ucmix")
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "ucmix")

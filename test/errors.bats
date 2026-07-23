@@ -7,7 +7,7 @@ load test_helper
   run "${UCMIX_BIN}" --host 127.0.0.1:1 get line.ch1.mute
   [ "$status" -ne 0 ]
   [[ "$output" == *"could not connect"* ]]
-  [[ "$output" == *"UCMIX_HOST"* ]]
+  [[ "$output" == *"reachable"* ]]
 }
 
 @test "no configured host fails with a hint" {

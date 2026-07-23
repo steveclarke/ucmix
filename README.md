@@ -41,12 +41,11 @@ go install github.com/steveclarke/ucmix/cmd/ucmix@latest
 
 ## Quickstart
 
-Point ucmix at the mixer, then read and write state. The mixer host comes from
-`--host`, the `UCMIX_HOST` environment variable, or `~/.config/ucmix/config.yml`
-(in that order); the UCNET control port `53000` is assumed when none is given.
+Find a mixer and save it, then read and write state:
 
 ```sh
-export UCMIX_HOST=mixer.local          # or 192.168.1.50
+ucmix setup                            # scan the LAN, pick a board, save it as a profile
+                                       #   (or: export UCMIX_HOST=192.168.1.50)
 
 ucmix dump line/ch1                     # every ch1 setting, humanized
 ucmix get line/ch1/volume              # -6 dB
@@ -58,7 +57,37 @@ ucmix recall "Main Live" "Opening"     # recall a stored scene
 
 Every command accepts `--json` for machine-readable output and `--no-color` for
 plain text. Values use human units: `-6dB`, `100Hz`, `on`/`off`, a physical
-input number for `adc_src`, a hex string for `color`.
+input number for `adc_src`, a hex string for `color`. Paths use slashes
+(`line/ch1/volume`) or dots (`line.ch1.volume`).
+
+## Connecting to a mixer
+
+ucmix resolves which mixer to talk to in this order: the `--host` flag, a named
+`--profile`, the `UCMIX_HOST` environment variable, the current saved profile,
+and a legacy `host:` in the config file. The UCNET control port `53000` is
+assumed when none is given.
+
+**Discovery and setup.** StudioLive mixers announce themselves on the LAN, so
+ucmix can find them:
+
+```sh
+ucmix discover                         # list mixers on the network
+ucmix setup                            # find one, name it, save it as a profile
+```
+
+**Profiles.** Save multiple boards and switch between them (front-of-house,
+monitors, a rehearsal rig):
+
+```sh
+ucmix profile add foh --host 192.168.1.50
+ucmix profile add monitor --host 192.168.1.51 --use
+ucmix profile ls                       # list, * marks the current one
+ucmix profile use foh                  # switch the current profile
+ucmix -p monitor dump line/ch1         # use a profile for one command, no switch
+```
+
+Profiles live in `~/.config/ucmix/config.yml` (or `$XDG_CONFIG_HOME/ucmix`);
+`ucmix config path` prints the location and `ucmix config edit` opens it.
 
 ## Board as code
 
