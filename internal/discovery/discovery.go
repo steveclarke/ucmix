@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/steveclarke/ucmix/internal/proto"
+	"golang.org/x/sys/unix"
 )
 
 // Port is the UDP port StudioLive mixers broadcast their presence on.
@@ -46,11 +47,13 @@ var listenUDP = func(port int) (net.PacketConn, error) {
 		Control: func(_, _ string, c syscall.RawConn) error {
 			var opErr error
 			if err := c.Control(func(fd uintptr) {
-				if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+				// SO_REUSEPORT is not in the stdlib syscall package on Linux
+				// (only x/sys/unix), so use unix for both to stay portable.
+				if err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
 					opErr = err
 					return
 				}
-				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 			}); err != nil {
 				return err
 			}
