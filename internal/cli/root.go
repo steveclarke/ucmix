@@ -38,14 +38,16 @@ const connectTimeout = 5 * time.Second
 // subcommand constructor — no package-level command state.
 type globals struct {
 	host    string
+	profile string
 	json    bool
 	noColor bool
 }
 
-// dialClient resolves the mixer host (flag > UCMIX_HOST > config file) and opens
-// a connection. Connect failures come back as an errs.CLIError with a hint.
+// dialClient resolves the mixer host (--host > --profile > UCMIX_HOST > current
+// profile > legacy host:) and opens a connection. Connect failures come back as
+// an errs.CLIError with a hint.
 func (g *globals) dialClient(ctx context.Context) (*ucmix.Client, error) {
-	addr, err := config.ResolveHost(g.host)
+	addr, err := config.Resolve(g.host, g.profile)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +57,7 @@ func (g *globals) dialClient(ctx context.Context) (*ucmix.Client, error) {
 	if err != nil {
 		return nil, errs.CLIError{
 			Message: fmt.Sprintf("could not connect to mixer at %s: %v", addr, err),
-			Hint:    "check --host or UCMIX_HOST; is the mixer reachable?",
+			Hint:    "check the host or profile; is the mixer reachable?",
 		}
 	}
 	return c, nil
@@ -75,7 +77,8 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	pf := root.PersistentFlags()
-	pf.StringVar(&g.host, "host", "", "mixer host[:port] (overrides UCMIX_HOST and config file)")
+	pf.StringVar(&g.host, "host", "", "mixer host[:port] (overrides --profile, UCMIX_HOST, and the config file)")
+	pf.StringVarP(&g.profile, "profile", "p", "", "use a saved profile for this command (see `ucmix profile`)")
 	pf.BoolVar(&g.json, "json", false, "emit machine-readable JSON")
 	pf.BoolVar(&g.noColor, "no-color", false, "disable colored output")
 
@@ -89,6 +92,10 @@ func newRootCmd() *cobra.Command {
 		newStoreCmd(g),
 		newResetCmd(g),
 		newLsCmd(g),
+		newProfileCmd(g),
+		newConfigCmd(g),
+		newDiscoverCmd(g),
+		newSetupCmd(g),
 	)
 	return root
 }

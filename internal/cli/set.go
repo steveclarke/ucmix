@@ -18,9 +18,13 @@ func newSetCmd(g *globals) *cobra.Command {
 		Use:   "set <path> <value>",
 		Short: "Write one mixer value",
 		Long: "Write one mixer value.\n\n" +
+			"Paths use slashes (line/ch1/volume) or dots (line.ch1.volume).\n\n" +
 			"Value forms: on/off, true/false; numbers with an optional unit " +
 			"(-6dB, 100Hz, 400ms, 0.5); a quoted string for names; and hex for " +
 			"color (4ed2ff or #4ed2ff).",
+		Example: `  ucmix set line/ch1/volume -6dB
+  ucmix set line/ch1/username "Kick"
+  ucmix set line/ch1/48v on`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := normalizePath(args[0])

@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-func TestResolveHostPrecedence(t *testing.T) {
+func TestResolvePrecedence(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "config.yml"), "host: fileboard\n")
+	writeFile(t, filepath.Join(dir, "config.yml"),
+		"host: legacyboard\ncurrent: foh\nprofiles:\n  foh:\n    host: fohboard\n  monitor:\n    host: monitorboard\n")
 
 	env := map[string]string{}
 	f := File{
@@ -18,51 +19,84 @@ func TestResolveHostPrecedence(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		flagHost string
-		envHost  string
-		want     string
+		name        string
+		flagHost    string
+		flagProfile string
+		envHost     string
+		want        string
 	}{
-		{"flag wins over env and file", "flagboard", "envboard", "flagboard:53000"},
-		{"env wins over file", "", "envboard", "envboard:53000"},
-		{"file when no flag or env", "", "", "fileboard:53000"},
-		{"flag keeps explicit port", "flagboard:9000", "", "flagboard:9000"},
-		{"flag is trimmed", "  flagboard  ", "", "flagboard:53000"},
+		{"flag host wins over everything", "flagboard", "", "envboard", "flagboard:53000"},
+		{"profile flag wins over env and current", "", "monitor", "envboard", "monitorboard:53000"},
+		{"env wins over current profile", "", "", "envboard", "envboard:53000"},
+		{"current profile when no flag or env", "", "", "", "fohboard:53000"},
+		{"flag host keeps explicit port", "flagboard:9000", "", "", "flagboard:9000"},
+		{"flag host is trimmed", "  flagboard  ", "", "", "flagboard:53000"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env[EnvHost] = tt.envHost
-			got, err := f.ResolveHost(tt.flagHost)
+			got, err := f.Resolve(tt.flagHost, tt.flagProfile)
 			if err != nil {
-				t.Fatalf("ResolveHost: %v", err)
+				t.Fatalf("Resolve: %v", err)
 			}
 			if got != tt.want {
-				t.Errorf("ResolveHost = %q, want %q", got, tt.want)
+				t.Errorf("Resolve = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestResolveHostErrorsWhenUnset(t *testing.T) {
+func TestResolveLegacyHostFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "config.yml"), "host: legacyboard\n")
+	f := File{ConfigDir: dir, Env: func(string) string { return "" }}
+	got, err := f.Resolve("", "")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "legacyboard:53000" {
+		t.Errorf("Resolve = %q, want legacyboard:53000", got)
+	}
+}
+
+func TestResolveHostAndProfileConflict(t *testing.T) {
+	f := File{ConfigDir: t.TempDir(), Env: func(string) string { return "" }}
+	if _, err := f.Resolve("someboard", "foh"); err == nil {
+		t.Fatal("want error when both --host and --profile given, got nil")
+	}
+}
+
+func TestResolveUnknownProfile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "config.yml"), "profiles:\n  foh:\n    host: fohboard\n")
+	f := File{ConfigDir: dir, Env: func(string) string { return "" }}
+	if _, err := f.Resolve("", "nope"); err == nil {
+		t.Fatal("want error for unknown profile, got nil")
+	}
+}
+
+func TestResolveErrorsWhenUnset(t *testing.T) {
 	dir := t.TempDir() // empty: no config files
 	f := File{ConfigDir: dir, Env: func(string) string { return "" }}
-	_, err := f.ResolveHost("")
+	_, err := f.Resolve("", "")
 	if err == nil {
 		t.Fatal("want error when no host configured, got nil")
 	}
 }
 
-func TestResolveHostLocalOverride(t *testing.T) {
+func TestResolveCurrentProfileFromLocalOverlay(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "config.yml"), "host: baseboard\n")
-	writeFile(t, filepath.Join(dir, "config.local.yml"), "host: localboard\n")
+	writeFile(t, filepath.Join(dir, "config.yml"),
+		"profiles:\n  foh:\n    host: fohboard\n  monitor:\n    host: monitorboard\n")
+	// The machine-local current pointer selects a profile defined in config.yml.
+	writeFile(t, filepath.Join(dir, "config.local.yml"), "current: monitor\n")
 	f := File{ConfigDir: dir, Env: func(string) string { return "" }}
-	got, err := f.ResolveHost("")
+	got, err := f.Resolve("", "")
 	if err != nil {
-		t.Fatalf("ResolveHost: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
-	if got != "localboard:53000" {
-		t.Errorf("ResolveHost = %q, want localboard:53000", got)
+	if got != "monitorboard:53000" {
+		t.Errorf("Resolve = %q, want monitorboard:53000", got)
 	}
 }
 
