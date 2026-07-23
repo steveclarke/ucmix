@@ -30,6 +30,8 @@ type Client struct {
 	t    transport.Transport
 	tree *state.Tree
 
+	ckAsm proto.ChunkAssembler // reassembles a CK-chunked snapshot; used only from the read goroutine
+
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 	closeErr  error
@@ -120,6 +122,21 @@ func (c *Client) handle(f proto.Frame) (isZB bool) {
 		}
 	case proto.CodeZB:
 		if m, err := proto.ParseZB(f.Payload); err == nil {
+			c.tree.LoadSnapshot(m)
+			return true
+		}
+	case proto.CodeCK:
+		// Real boards chunk the snapshot across CK frames; reassemble, then
+		// decode the completed blob exactly as a ZB.
+		chunk, err := proto.ParseCK(f.Payload)
+		if err != nil {
+			return false
+		}
+		blob, complete := c.ckAsm.Add(chunk)
+		if !complete {
+			return false
+		}
+		if m, err := proto.ParseZB(blob); err == nil {
 			c.tree.LoadSnapshot(m)
 			return true
 		}

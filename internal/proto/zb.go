@@ -171,8 +171,26 @@ func appendFloat32(dst []byte, f float32) []byte {
 
 // flatten walks a nested UBJSON object, writing scalar/array leaves into out
 // keyed by their "/"-joined path.
+//
+// Real boards wrap the tree in structural keys: a node's child controls live
+// under a "children" map and its leaf values under a "values" map, neither of
+// which is part of the control's path — "children/line/children/ch1/values/mute"
+// is the control "line/ch1/mute". So "children" and "values" are descended
+// transparently (their own name is not added to the path), and the "strings"
+// (enum options) and "ranges" (min/max/def/units) metadata maps are skipped.
+// Plain nested maps (as the fake board emits) still flatten by their key, so
+// both real and synthetic snapshots produce the same namespace.
 func flatten(prefix string, node map[string]any, out map[string]any) {
 	for k, v := range node {
+		switch k {
+		case "children", "values":
+			if child, ok := v.(map[string]any); ok {
+				flatten(prefix, child, out) // transparent wrapper: don't add k to the path
+				continue
+			}
+		case "strings", "ranges":
+			continue // metadata, not control state
+		}
 		path := k
 		if prefix != "" {
 			path = prefix + "/" + k

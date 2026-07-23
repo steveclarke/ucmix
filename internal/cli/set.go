@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveclarke/ucmix/internal/errs"
@@ -48,6 +49,14 @@ func newSetCmd(g *globals) *cobra.Command {
 					Message: fmt.Sprintf("could not set %s: %v", path, err),
 					Hint:    "check the value is in range for this control",
 				}
+			}
+
+			// Write barrier: hold the connection briefly so the board commits the
+			// write before we close. Closing immediately races delivery and the
+			// write is silently dropped.
+			select {
+			case <-time.After(500 * time.Millisecond):
+			case <-cmd.Context().Done():
 			}
 
 			if g.json {
