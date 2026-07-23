@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/x/term"
@@ -72,7 +73,7 @@ func newApplyCmd(g *globals) *cobra.Command {
 
 			// Connection B (fresh): the in-session read-back quirk means A cannot
 			// verify its own writes reliably; a new ZB is required.
-			drift, err := verifyOnFreshConn(ctx, g, desired)
+			drift, err := verifyAfterApply(ctx, g, desired)
 			if err != nil {
 				return &exitError{code: 2, err: err}
 			}
@@ -83,6 +84,36 @@ func newApplyCmd(g *globals) *cobra.Command {
 	cmd.Flags().BoolVar(&reset, "reset", false, "factory-reset the board before applying (destructive)")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the reset confirmation prompt")
 	return cmd
+}
+
+// verifyAfterApply runs the fresh-connection verify, tolerating board settle
+// latency: a value written on connection A may not appear in a new connection's
+// ZB snapshot until the board finishes committing it (connection B missed the
+// live delta and its ZB can predate the write). It re-dials a few times,
+// returning as soon as the board reads clean; genuine drift survives every
+// retry and is reported. A clean apply returns on the first attempt with no
+// added delay.
+func verifyAfterApply(ctx context.Context, g *globals, desired []boardconfig.Desired) ([]boardconfig.Mismatch, error) {
+	const attempts = 5
+	var drift []boardconfig.Mismatch
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			select {
+			case <-time.After(200 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		var err error
+		drift, err = verifyOnFreshConn(ctx, g, desired)
+		if err != nil {
+			return nil, err
+		}
+		if len(drift) == 0 {
+			return nil, nil
+		}
+	}
+	return drift, nil
 }
 
 // confirmReset gates the destructive --reset, matching the standalone `reset`
