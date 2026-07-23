@@ -8,7 +8,7 @@ import "encoding/json"
 func MarshalJM(v any) []byte {
 	body, err := json.Marshal(v)
 	if err != nil {
-		// Command bodies here are closed structs of strings/ints; marshalling
+		// Command bodies here are closed structs of strings/ints; marshaling
 		// cannot fail. Panicking would violate the "never panic" contract, so
 		// fall back to an empty body rather than crash a caller.
 		body = []byte("{}")
@@ -115,7 +115,7 @@ func (c RestorePresetCmd) MarshalJSON() ([]byte, error) {
 //
 // Note: the featherbear library lists via an FD (FileRequest) packet, not JM.
 // The protocol doc records the JM form as {"id":"Listpresets", ...} but the full
-// body was not captured. URL is the modelled variable; adjust once a real
+// body was not captured. URL is the modeled variable; adjust once a real
 // Listpresets JM frame is captured from the board.
 type ListPresetsCmd struct {
 	URL string `json:"url"`

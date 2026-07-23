@@ -281,6 +281,6 @@ func TestDialContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := Dial(ctx, "board:53000", Options{}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Dial with cancelled ctx = %v, want context.Canceled", err)
+		t.Fatalf("Dial with canceled ctx = %v, want context.Canceled", err)
 	}
 }

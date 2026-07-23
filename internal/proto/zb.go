@@ -23,7 +23,7 @@ func ParseZB(payload []byte) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("proto: ZB zlib header: %w", err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	raw, err := io.ReadAll(zr)
 	if err != nil {
