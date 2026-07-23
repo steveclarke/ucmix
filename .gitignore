@@ -1,5 +1,9 @@
 /dist/
+/completions/
 *.out
 *.test
 coverage.*
 .DS_Store
+
+# Real board captures used for richer local E2E — never committed (see design §7.4)
+/testdata/private/

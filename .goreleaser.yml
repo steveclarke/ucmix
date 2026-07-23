@@ -1,0 +1,83 @@
+version: 2
+
+before:
+  hooks:
+    - sh -c 'mkdir -p completions && go run ./cmd/ucmix completion bash > completions/ucmix.bash && go run ./cmd/ucmix completion zsh > completions/_ucmix && go run ./cmd/ucmix completion fish > completions/ucmix.fish'
+
+builds:
+  - main: ./cmd/ucmix
+    binary: ucmix
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/steveclarke/ucmix/internal/cli.version={{.Version}} -X github.com/steveclarke/ucmix/internal/cli.commit={{.ShortCommit}} -X github.com/steveclarke/ucmix/internal/cli.date={{.Date}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - completions/*
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+
+nfpms:
+  - package_name: ucmix
+    vendor: Steve Clarke
+    homepage: "https://github.com/steveclarke/ucmix"
+    maintainer: "Steve Clarke <steve@sevenview.ca>"
+    description: "Control PreSonus StudioLive mixers over UCNET (unofficial)"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: completions/ucmix.bash
+        dst: /usr/share/bash-completion/completions/ucmix
+      - src: completions/_ucmix
+        dst: /usr/share/zsh/vendor-completions/_ucmix
+        packager: deb
+      - src: completions/_ucmix
+        dst: /usr/share/zsh/site-functions/_ucmix
+        packager: rpm
+      - src: completions/ucmix.fish
+        dst: /usr/share/fish/vendor_completions.d/ucmix.fish
+
+brews:
+  - repository:
+      owner: steveclarke
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    name: ucmix
+    homepage: "https://github.com/steveclarke/ucmix"
+    description: "Control PreSonus StudioLive mixers over UCNET (unofficial)"
+    license: "MIT"
+    install: |
+      bin.install "ucmix"
+      bash_completion.install "completions/ucmix.bash" => "ucmix"
+      zsh_completion.install "completions/_ucmix"
+      fish_completion.install "completions/ucmix.fish"
+    test: |
+      system "#{bin}/ucmix --version"
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"

@@ -1,17 +1,20 @@
 module := "github.com/steveclarke/ucmix"
 bin := "ucmix"
+main := "./cmd/ucmix"
+ldflags := "-X " + module + "/internal/cli.version=dev-$(git rev-parse --short HEAD) -X " + module + "/internal/cli.commit=$(git rev-parse --short HEAD) -X " + module + "/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # List available recipes
 default:
     @just --list
 
-# Install pinned toolchain (go, gotestsum, golangci-lint, goreleaser, govulncheck, bats)
+# Install the pinned toolchain (go, gotestsum, golangci-lint, goreleaser, govulncheck, bats)
 setup:
     mise install
 
 # Build the CLI to dist/ with version info injected
 build:
-    go build -ldflags "-X {{module}}/cmd.version=dev-$(git rev-parse --short HEAD) -X {{module}}/cmd.commit=$(git rev-parse --short HEAD) -X {{module}}/cmd.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/{{bin}} .
+    @mkdir -p dist
+    go build -ldflags "{{ldflags}}" -o dist/{{bin}} {{main}}
 
 # Run unit tests (readable output)
 test:
@@ -32,6 +35,10 @@ test-e2e: build
 # Run unit + e2e tests
 test-all: test test-e2e
 
+# Run hardware tests against a real mixer (needs UCMIX_MIXER_ADDR; never in CI)
+test-hw:
+    go test -tags hardware ./...
+
 # Lint
 lint:
     golangci-lint run
@@ -44,9 +51,9 @@ vet:
 fmt:
     gofmt -w .
 
-# Check formatting
+# Check formatting (fails if anything is unformatted)
 fmt-check:
-    gofmt -l .
+    @test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
 
 # Tidy modules
 tidy:
@@ -60,18 +67,38 @@ tidy-check:
 vulncheck:
     govulncheck ./...
 
-# Install to GOBIN
+# Install a dev build to GOBIN (overrides Homebrew)
 install:
-    go install -ldflags "-X {{module}}/cmd.version=dev-$(git rev-parse --short HEAD)" .
+    go install -ldflags "{{ldflags}}" {{main}}
+    @echo "Installed dev build to $(go env GOBIN)"
 
-# Run without building
+# Remove the dev build (switch back to Homebrew)
+uninstall:
+    rm -f "$(go env GOBIN)/{{bin}}"
+    @echo "Removed dev build."
+
+# Show which ucmix binary is active
+which:
+    @which {{bin}}
+    @{{bin}} --version
+
+# Run the CLI without building (e.g. just run dump)
 run *args:
-    go run . {{args}}
+    go run {{main}} {{args}}
 
 # Remove build artifacts
 clean:
-    rm -rf dist/
+    rm -rf dist completions
 
-# Show version
+# Show current version
 version:
-    @git describe --tags --always
+    go run {{main}} --version
+
+# Dry-run release (validate GoReleaser config locally)
+release-dry-run:
+    goreleaser release --snapshot --clean
+
+# Tag and push a release (e.g. just release v0.1.0)
+release tag:
+    git tag {{tag}}
+    git push origin {{tag}}

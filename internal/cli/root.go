@@ -1,4 +1,7 @@
-package cmd
+// Package cli wires the ucmix cobra command tree. Commands use constructor
+// style (newXxxCmd) with no package-level command globals; they stay thin and
+// delegate to the internal packages.
+package cli
 
 import (
 	"fmt"
@@ -15,7 +18,7 @@ var (
 )
 
 // newRootCmd builds the root command. Subcommands are wired here as they are
-// implemented (constructor style — no package-level command globals).
+// implemented.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "ucmix",
