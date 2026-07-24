@@ -117,18 +117,26 @@ value; there is no humanizing layer. Reproduce a sound by reading each with
 Channel send into an FX processor: `line/ch{c}/FXA`…`FXH` (dB). FX return level in
 a mix: on the `fxreturn` channel within that mix.
 
-## `filtergroup/ch{n}` — DCA group
+## `filtergroup/ch{n}` — DCA group (Filter DCA)
 
 | Path | Form | Notes |
 |------|------|-------|
 | `name` | string | DCA name |
-| `volume` | dB | The DCA fader (rides its members) |
+| `line{m}` | on/off | Channel `m` in/out of the group — the membership toggle |
+| `volume` | dB | The DCA master fader (rides its members) |
 | `mute` | on/off | |
 | `iconid` | string | |
 
-DCA membership assignment is encoded in the group's structure and is not a simple
-single-path toggle — inspect `dump filtergroup/ch{n}` on a real board before
-scripting it.
+Membership is a per-channel toggle: `set filtergroup/ch{n}/line{m} on` adds channel `m`,
+`off` removes it. The `ch{n}` index is a list slot, not the DCA number — confirm the label
+with `get filtergroup/ch{n}/name`. Write members one per connection and verify; rapid
+back-to-back writes can drop.
+
+```bash
+# DCA on ch2 named "Band", channels 1–10
+ucmix set filtergroup/ch2/name Band
+for m in $(seq 1 10); do ucmix set filtergroup/ch2/line$m on; done
+```
 
 ## `mutegroup`
 
