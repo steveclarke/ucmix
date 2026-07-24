@@ -12,14 +12,15 @@ import (
 	ucmix "github.com/steveclarke/ucmix"
 )
 
-// listErr wraps a ListProjects failure as a CLIError, giving a real-hardware
-// hint when the board never answered the preset-list request (rather than
-// hanging, ListProjects now fails cleanly).
+// listErr wraps a ListProjects failure as a CLIError. On a timeout the board
+// gave no answer to the preset-list request; rather than hanging, ListProjects
+// now fails cleanly. UC Surface lists projects and scenes on the same hardware,
+// so a no-answer points at ucmix's request format, not a board limitation.
 func listErr(what string, err error) error {
 	if errors.Is(err, ucmix.ErrListTimeout) {
 		return errs.CLIError{
 			Message: fmt.Sprintf("%s: the mixer did not answer the preset-list request", what),
-			Hint:    "some firmware does not reply to this request; listing may be unsupported on this board",
+			Hint:    "UC Surface lists these on the same board, so this is likely a ucmix request-format gap, not a mixer limitation",
 		}
 	}
 	return errs.CLIError{Message: fmt.Sprintf("%s: %v", what, err)}
