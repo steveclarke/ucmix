@@ -1,9 +1,12 @@
 package ucmix
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"math"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -103,6 +106,30 @@ func connectWithZB(t *testing.T, ft *fakeTransport, seed map[string]any) *Client
 		done <- c
 	}()
 	ft.deliver(zbFrame(t, seed))
+	c := <-done
+	if c == nil {
+		t.Fatal("Connect failed")
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+// connectWithBlob connects a client to ft, delivering a pre-built ZB blob (e.g.
+// a captured real-hardware snapshot) as the ZB reply.
+func connectWithBlob(t *testing.T, ft *fakeTransport, blob []byte) *Client {
+	t.Helper()
+	useFake(t, ft)
+	done := make(chan *Client, 1)
+	go func() {
+		c, err := Connect(context.Background(), "fake")
+		if err != nil {
+			t.Errorf("Connect: %v", err)
+			done <- nil
+			return
+		}
+		done <- c
+	}()
+	ft.deliver(proto.Frame{Code: proto.CodeZB, Payload: blob})
 	c := <-done
 	if c == nil {
 		t.Fatal("Connect failed")
@@ -293,10 +320,11 @@ func TestSetOverRangeReturnsError(t *testing.T) {
 	}
 }
 
-func TestGetHumanizesVolumeReadScale(t *testing.T) {
+func TestGetHumanizesVolume(t *testing.T) {
 	ft := newFakeTransport()
-	// Board reports volume ×100 (read quirk): 74.6 display -> -6 dB.
-	c := connectWithZB(t, ft, map[string]any{"line/ch1/volume": float32(74.6)})
+	// The board returns the plain 0..1 wire position: 0.746 = -6 dB. A read-scale
+	// divide here would corrupt it (0.746/100 -> ~-83 dB).
+	c := connectWithZB(t, ft, map[string]any{"line/ch1/volume": float32(0.746)})
 	v, ok := c.Get("line/ch1/volume")
 	if !ok {
 		t.Fatal("volume missing")
@@ -307,8 +335,83 @@ func TestGetHumanizesVolumeReadScale(t *testing.T) {
 	// Raw stays as stored (ZB floats decode to float64).
 	rv, _ := c.GetRaw("line/ch1/volume")
 	rf, _ := toFloat64(rv)
-	if math.Abs(rf-74.6) > 1e-3 {
-		t.Fatalf("GetRaw(volume) = %v, want 74.6", rv)
+	if math.Abs(rf-0.746) > 1e-3 {
+		t.Fatalf("GetRaw(volume) = %v, want 0.746", rv)
+	}
+}
+
+func TestGetHumanizesColorFromSnapshot(t *testing.T) {
+	ft := newFakeTransport()
+	// A ZB stores color ABGR-packed into an integer: the little-endian read of the
+	// wire bytes 94 78 ce ff. Humanized read unpacks it back to the RGBA bytes,
+	// symmetric with the write (which parses "9478ce" into those bytes).
+	c := connectWithZB(t, ft, map[string]any{"line/ch1/color": int64(0xffce7894)})
+	v, ok := c.Get("line/ch1/color")
+	if !ok {
+		t.Fatal("color missing")
+	}
+	b, isBytes := v.([]byte)
+	if !isBytes {
+		t.Fatalf("Get(color) = %T (%v), want humanized []byte", v, v)
+	}
+	if got := hex.EncodeToString(b); got != "9478ceff" {
+		t.Errorf("Get(color) = %s, want 9478ceff (unpacked RGBA)", got)
+	}
+	// --raw keeps the packed integer.
+	if rv, _ := c.GetRaw("line/ch1/color"); rv != int64(0xffce7894) {
+		t.Errorf("GetRaw(color) = %v, want the packed int 0xffce7894", rv)
+	}
+}
+
+func TestGetHumanizesColorFromDelta(t *testing.T) {
+	ft := newFakeTransport()
+	c := connectWithZB(t, ft, map[string]any{})
+	// A live PC delta already carries the RGBA bytes; Get passes them through.
+	ft.deliver(proto.Frame{Code: proto.CodePC, Payload: proto.MarshalPC("line/ch1/color", []byte{0x4e, 0xd2, 0xff, 0xff})})
+	waitFor(t, func() bool { _, ok := c.GetRaw("line/ch1/color"); return ok })
+	v, ok := c.Get("line/ch1/color")
+	if !ok {
+		t.Fatal("color missing")
+	}
+	b, _ := v.([]byte)
+	if got := hex.EncodeToString(b); got != "4ed2ffff" {
+		t.Errorf("Get(color) = %s, want 4ed2ffff (PC delta bytes pass through)", got)
+	}
+}
+
+func TestColorReadInvertsWritePacking(t *testing.T) {
+	// The write parses "9478ce" to the wire bytes below; a snapshot stores them
+	// little-endian packed. humanizeColor must invert the packing so a set value
+	// reads back identically (bug #14: read must round-trip the write).
+	wire := []byte{0x94, 0x78, 0xce, 0xff}
+	packed := int64(uint32(wire[0]) | uint32(wire[1])<<8 | uint32(wire[2])<<16 | uint32(wire[3])<<24)
+	got, ok := humanizeColor(packed).([]byte)
+	if !ok || !bytes.Equal(got, wire) {
+		t.Errorf("humanizeColor(packed) = % x, want % x", got, wire)
+	}
+}
+
+// TestRealSnapshotColorHumanizes reads the captured 32R snapshot end to end
+// through the client and checks a known channel color humanizes to hex.
+// line/ch1 in the capture is 0x4ed2ffff (cyan); the read must return that, not
+// the raw packed integer (bug #14).
+func TestRealSnapshotColorHumanizes(t *testing.T) {
+	blob, err := os.ReadFile("internal/proto/testdata/real-snapshot-32r.zb")
+	if err != nil {
+		t.Skipf("no real-hardware fixture: %v", err)
+	}
+	ft := newFakeTransport()
+	c := connectWithBlob(t, ft, blob)
+	v, ok := c.Get("line/ch1/color")
+	if !ok {
+		t.Fatal("line/ch1/color missing from snapshot")
+	}
+	b, isBytes := v.([]byte)
+	if !isBytes {
+		t.Fatalf("Get(color) = %T (%v), want humanized []byte", v, v)
+	}
+	if got := hex.EncodeToString(b); got != "4ed2ffff" {
+		t.Errorf("Get(line/ch1/color) = %s, want 4ed2ffff", got)
 	}
 }
 

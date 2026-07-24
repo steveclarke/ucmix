@@ -17,7 +17,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
-	"strings"
 	"sync"
 
 	"github.com/steveclarke/ucmix/internal/proto"
@@ -30,10 +29,6 @@ type Board struct {
 	// DropAfterFrames, when > 0, closes a connection after it has RECEIVED that
 	// many frames (exercises client pacing/reconnect). The Subscribe frame counts.
 	DropAfterFrames int
-	// VolumeReadScale, when true, surfaces values under keys whose last path
-	// segment is "volume" multiplied by 100 in the ZB snapshot, faithful to the
-	// real board's read quirk. It affects the ZB only, not broadcast deltas.
-	VolumeReadScale bool
 	// StaleAfter, when > 0, stops delivering live delta frames to a connection
 	// once that many deltas have been SENT to it (stale-subscription).
 	StaleAfter int
@@ -185,8 +180,10 @@ func (b *Board) handleFrame(c *conn, f proto.Frame) {
 }
 
 // applyDelta decodes a PV/PC/PS frame and applies it to the tree. Values are
-// stored in ZB-encodable kinds: PV as float32, PS as string, PC color bytes as
-// a string (cosmetic — broadcasts still carry the exact PC bytes).
+// stored in ZB-encodable kinds that match what a real 32R surfaces in its
+// snapshot: PV as float32, PS as string, PC color as the ABGR-packed integer
+// (the little-endian read of the RGBA wire bytes). Broadcasts still carry the
+// exact PC bytes to live subscribers.
 func (b *Board) applyDelta(f proto.Frame) {
 	switch f.Code {
 	case proto.CodePV:
@@ -199,7 +196,7 @@ func (b *Board) applyDelta(f proto.Frame) {
 		}
 	case proto.CodePC:
 		if k, raw, err := proto.UnmarshalPC(f.Payload); err == nil {
-			b.tree.Apply(k, string(raw))
+			b.tree.Apply(k, packColor(raw))
 		}
 	}
 }
@@ -317,19 +314,10 @@ func (b *Board) pushZBToAll() {
 	}
 }
 
-// buildZBFrame builds a ZB frame from the current tree, applying the volume read
-// scale quirk if enabled.
+// buildZBFrame builds a ZB frame from the current tree. Values surface at their
+// plain wire scale, matching a real 32R read.
 func (b *Board) buildZBFrame() []byte {
 	snap := b.tree.Snapshot()
-	if b.VolumeReadScale {
-		for k, v := range snap {
-			if lastSeg(k) == "volume" {
-				if f, ok := toFloat(v); ok {
-					snap[k] = f * 100
-				}
-			}
-		}
-	}
 	blob, err := proto.BuildZB(snap)
 	if err != nil {
 		// Every value in the tree is stored in a ZB-encodable kind, so this
@@ -374,6 +362,16 @@ func jmID(payload []byte) (string, []byte) {
 	return probe.ID, body
 }
 
+// packColor ABGR-packs 4 RGBA color bytes into the integer a real board stores
+// and surfaces in its snapshot (the little-endian read of the wire bytes). A
+// payload that is not 4 bytes is kept verbatim as a string.
+func packColor(raw []byte) any {
+	if len(raw) != 4 {
+		return string(raw)
+	}
+	return int64(uint32(raw[0]) | uint32(raw[1])<<8 | uint32(raw[2])<<16 | uint32(raw[3])<<24)
+}
+
 // factoryTree is the small generic "factory default" state a ResetMixer loads.
 func factoryTree() map[string]any {
 	return map[string]any{
@@ -381,25 +379,5 @@ func factoryTree() map[string]any {
 		"line/ch1/mute":     float32(0.0),
 		"line/ch1/volume":   float32(0.0),
 		"main/ch1/volume":   float32(0.75),
-	}
-}
-
-// lastSeg returns the final "/"-delimited segment of path.
-func lastSeg(path string) string {
-	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		return path[i+1:]
-	}
-	return path
-}
-
-// toFloat coerces float32/float64 tree values to float64 for scaling.
-func toFloat(v any) (float64, bool) {
-	switch f := v.(type) {
-	case float64:
-		return f, true
-	case float32:
-		return float64(f), true
-	default:
-		return 0, false
 	}
 }

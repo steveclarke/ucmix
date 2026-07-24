@@ -52,6 +52,14 @@ load test_helper
   [[ "$output" == *"0.74"* ]]
 }
 
+@test "get humanizes a fader to dB (plain wire, no read-scale)" {
+  # Wire 0.746 is -6 dB; a bogus ×100 read-scale would report ~-83.
+  run "${UCMIX_BIN}" get line.ch1.volume
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-6"* ]]
+  [[ "$output" != *"-83"* ]]
+}
+
 @test "get --json emits an envelope" {
   run "${UCMIX_BIN}" get line.ch1.username --json
   [ "$status" -eq 0 ]

@@ -1,8 +1,8 @@
 // Package schema is a data-driven table of known UCNET keys for the StudioLive
 // Series III board. Each row (a [KeySpec]) records how to encode a write and
-// humanize a read for one key family: its wire kind, whether it is writable,
-// the ×100 read quirk on volume fields, and the taper that converts its 0..1
-// wire position to human units.
+// humanize a read for one key family: its wire kind, whether it is writable, an
+// optional read-side scale divisor, and the taper that converts its 0..1 wire
+// position to human units.
 //
 // The table adds safety and units; it never gates access. [Lookup] returns
 // (spec, true) for a known key and (zero, false) for anything else — an unknown
@@ -45,8 +45,11 @@ type KeySpec struct {
 	Kind Kind
 	// Writable reports whether the key is in the verified-write table.
 	Writable bool
-	// ReadScale divides a raw read to reach the stored value: 1 normally, 100
-	// for the */volume read quirk (reads 0..100, wire wants 0..1).
+	// ReadScale divides a raw read to reach the 0..1 wire position before the
+	// taper. It is 1 for every known key on 32R firmware 3.4.0: the board returns
+	// the plain wire value on read. The field stays in the table so a future
+	// firmware that inflates a read (e.g. reporting 0..100) can be corrected per
+	// key without touching the read path.
 	ReadScale float64
 	// Taper converts the 0..1 wire position to human units. nil = raw
 	// pass-through (the value carries no dB/Hz/input meaning, or the curve is
@@ -69,8 +72,7 @@ var specs = []KeySpec{
 	{Pattern: "line/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
 	{Pattern: "line/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
 	{Pattern: "line/ch{n}/assign_fx{m}", Kind: KindBool, Writable: true, ReadScale: 1},
-	// volume carries the ×100 read quirk (reads 0..100, wire wants 0..1).
-	{Pattern: "line/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 100, Taper: taper.Fader},
+	{Pattern: "line/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
 	// aux{m} = monitor send; FX{A..H} = reverb send. Both use the send taper.
 	{Pattern: "line/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
 	{Pattern: "line/ch{n}/FX{A..H}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
@@ -96,8 +98,7 @@ var specs = []KeySpec{
 	{Pattern: "line/ch{n}/comp/gain", Kind: KindFloat, Writable: true, ReadScale: 1},
 
 	// --- aux/chN — monitor mix master ---
-	// volume carries the same ×100 read quirk as line volume.
-	{Pattern: "aux/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 100, Taper: taper.Fader},
+	{Pattern: "aux/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
 	{Pattern: "aux/ch{n}/username", Kind: KindString, Writable: true, ReadScale: 1},
 	// link/linkmaster read as float on aux but encode 1.0/0.0 → keep KindBool.
 	{Pattern: "aux/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},

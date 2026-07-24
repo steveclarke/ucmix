@@ -13,12 +13,10 @@ import (
 // Desired is one compiled write: a wire path, the value to compare/apply, and
 // the human value it came from (for diff output).
 //
-// WireValue is expressed in the board's *read/snapshot* scale, so it compares
-// directly against [Diff]'s snapshot. For volume families that means the human
-// dB is taper-converted to a 0..1 position and then multiplied by ReadScale
-// (×100) — e.g. -6 dB → 0.746 → 74.6, matching a snapshot read. An apply layer
-// that writes raw PV must undo the ×100 (the "÷100 write" quirk); it must not
-// send WireValue verbatim for those keys.
+// WireValue is expressed in the board's read/snapshot scale, so it compares
+// directly against [Diff]'s snapshot. For a tapered field the human value is
+// taper-converted to a 0..1 position and then multiplied by ReadScale — 1 on
+// current firmware, so e.g. -6 dB → 0.746, matching a plain-wire snapshot read.
 type Desired struct {
 	Path       string
 	WireValue  any

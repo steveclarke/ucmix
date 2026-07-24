@@ -60,7 +60,11 @@ func newDumpCmd(g *globals) *cobra.Command {
 			}
 
 			if g.json {
-				return printJSON(values)
+				jsonValues := make(map[string]any, len(values))
+				for p, v := range values {
+					jsonValues[p] = jsonValue(v)
+				}
+				return printJSON(jsonValues)
 			}
 			display := make(map[string]string, len(values))
 			for p, v := range values {

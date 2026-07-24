@@ -95,3 +95,61 @@ func TestParseZBRealSnapshot(t *testing.T) {
 		}
 	}
 }
+
+// TestRealSnapshotVolumesArePlainWire is the regression guard for the bogus ×100
+// volume read-scale (bug #16). A real 32R returns the plain 0..1 wire position on
+// read, so every "volume" leaf in the capture must fall in [0, 1] — a ×100 form
+// (e.g. 74.6) would prove the false assumption. The capture also contains
+// faders parked at -6 dB (wire 0.746), so the exact value the taper decodes to
+// -6 is present in real board state, not only in synthetic fixtures.
+func TestRealSnapshotVolumesArePlainWire(t *testing.T) {
+	blob, err := os.ReadFile("testdata/real-snapshot-32r.zb")
+	if err != nil {
+		t.Skipf("no real-hardware fixture: %v", err)
+	}
+	m, err := ParseZB(blob)
+	if err != nil {
+		t.Fatalf("ParseZB(real snapshot): %v", err)
+	}
+	seen := 0
+	for k, v := range m {
+		if lastSegment(k) != "volume" {
+			continue
+		}
+		f, ok := asFloat64(v)
+		if !ok {
+			continue // non-float volume leaves are not fader positions
+		}
+		seen++
+		if f < 0 || f > 1 {
+			t.Errorf("%s = %v, want a plain 0..1 wire position (not a ×100 read)", k, f)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no volume leaves found in the real snapshot")
+	}
+	// A parked -6 dB fader reads 0.746 on the wire; the capture has these.
+	if v, ok := asFloat64(m["filtergroup/ch1/volume"]); !ok || v < 0.7459 || v > 0.7461 {
+		t.Errorf("filtergroup/ch1/volume = %v (ok=%v), want ~0.746 (the -6 dB wire value)", m["filtergroup/ch1/volume"], ok)
+	}
+}
+
+// lastSegment returns the final "/"-delimited segment of a path.
+func lastSegment(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
+// asFloat64 coerces the float kinds ParseZB emits (float64) to float64.
+func asFloat64(v any) (float64, bool) {
+	switch f := v.(type) {
+	case float64:
+		return f, true
+	case float32:
+		return float64(f), true
+	default:
+		return 0, false
+	}
+}

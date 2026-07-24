@@ -1,25 +1,14 @@
 #!/usr/bin/env bats
 # End-to-end coverage for the board-as-code commands: apply, verify, and
-# dump --as-config. The fakeboard runs with the ×100 volume read-scale enabled
-# (FAKEBOARD_VOLUME_READ_SCALE), faithful to the real board, so the round-trip
-# exercises the read-scale seam: apply writes the human dB via Set (taper only,
-# no read-scale) and verify diffs the read-scale snapshot back.
+# dump --as-config. apply writes the human dB via Set (taper → plain 0..1 wire)
+# and verify diffs the plain-wire snapshot back — the same 0..1 scale a real 32R
+# returns on read.
 
 load test_helper
 
 CFG="${UCMIX_ROOT}/testdata/board-as-code.yml"
 
-# Override the shared setup to turn on the read-scale quirk before the fakeboard
-# starts; everything else matches test_helper's setup.
-setup() {
-  export NO_COLOR=1
-  export FAKEBOARD_VOLUME_READ_SCALE=1
-  TEST_TMP="$(mktemp -d)"
-  cd "${TEST_TMP}" || exit 1
-  start_fakeboard
-}
-
-@test "apply then verify round-trips clean (the read-scale seam)" {
+@test "apply then verify round-trips clean" {
   run "${UCMIX_BIN}" apply "${CFG}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"verify clean"* ]]

@@ -4,13 +4,14 @@ import (
 	"testing"
 )
 
-// modeledSnapshot is a raw wire snapshot (read-scale form: */volume ×100) that
-// exercises every family ToConfig models, plus unmodeled keys it must drop.
+// modeledSnapshot is a raw wire snapshot (plain 0..1 wire, as a real 32R returns
+// on read) that exercises every family ToConfig models, plus unmodeled keys it
+// must drop.
 func modeledSnapshot() map[string]any {
 	return map[string]any{
 		// unmodeled — must be dropped
 		"global/mixer_name":   "Board",
-		"main/ch1/volume":     74.6,
+		"main/ch1/volume":     0.746,
 		"line/ch1/pan":        0.5,
 		"line/ch1/eq/eqgain1": 0.3,
 		// channel 1 (odd link master)
@@ -21,7 +22,7 @@ func modeledSnapshot() map[string]any {
 		"line/ch1/panlinkstate": 1.0,
 		"line/ch1/48v":          1.0,
 		"line/ch1/lr":           1.0,
-		"line/ch1/volume":       74.6, // -6 dB
+		"line/ch1/volume":       0.746, // -6 dB
 		"line/ch1/mute":         0.0,
 		"line/ch1/aux5":         0.746,   // -6 dB send
 		"line/ch1/adc_src":      0.78125, // input 25
@@ -30,7 +31,7 @@ func modeledSnapshot() map[string]any {
 		"aux/ch5/link":            1.0,
 		"aux/ch5/linkmaster":      1.0,
 		"aux/ch5/panlinkstate":    1.0,
-		"aux/ch5/volume":          74.6, // -6 dB
+		"aux/ch5/volume":          0.746, // -6 dB
 		"aux/ch5/limit/limiteron": 1.0,
 		"aux/ch5/limit/threshold": 0.5, // -14 dB
 		"aux/ch5/limit/release":   0.5, // 400 ms

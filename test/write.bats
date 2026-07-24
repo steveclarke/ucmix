@@ -40,6 +40,16 @@ load test_helper
   [[ "$output" == *"4ed2ffff"* ]]
 }
 
+@test "set then get a color reads back as the same hex" {
+  run "${UCMIX_BIN}" set line.ch1.color 9478ce
+  [ "$status" -eq 0 ]
+  # Read it back on a fresh snapshot: the packed integer must humanize to hex,
+  # symmetric with the write echo (not a raw ABGR-packed int).
+  run "${UCMIX_BIN}" get line.ch1.color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"9478ceff"* ]]
+}
+
 @test "set --json emits color as hex, not base64" {
   run "${UCMIX_BIN}" set --json line.ch1.color 4ed2ff
   [ "$status" -eq 0 ]

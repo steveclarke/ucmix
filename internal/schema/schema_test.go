@@ -26,7 +26,7 @@ var rows = []row{
 	{"line/linkmaster", "line/ch1/linkmaster", KindBool, false, "", 1},
 	{"line/panlinkstate", "line/ch1/panlinkstate", KindBool, false, "", 1},
 	{"line/assign_fx", "line/ch1/assign_fx1", KindBool, false, "", 1},
-	{"line/volume", "line/ch12/volume", KindFloat, true, "dB", 100},
+	{"line/volume", "line/ch12/volume", KindFloat, true, "dB", 1},
 	{"line/aux", "line/ch3/aux2", KindFloat, true, "dB", 1},
 	{"line/FX", "line/ch5/FXA", KindFloat, true, "dB", 1},
 	{"line/adc_src", "line/ch9/adc_src", KindFloat, true, "input", 1},
@@ -47,7 +47,7 @@ var rows = []row{
 	{"line/comp/gain", "line/ch1/comp/gain", KindFloat, false, "", 1},
 
 	// aux/chN — monitor mix master
-	{"aux/volume", "aux/ch1/volume", KindFloat, true, "dB", 100},
+	{"aux/volume", "aux/ch1/volume", KindFloat, true, "dB", 1},
 	{"aux/username", "aux/ch1/username", KindString, false, "", 1},
 	{"aux/link", "aux/ch1/link", KindBool, false, "", 1},
 	{"aux/linkmaster", "aux/ch1/linkmaster", KindBool, false, "", 1},
@@ -96,15 +96,18 @@ func TestLookupSeededKeys(t *testing.T) {
 	}
 }
 
-// TestVolumeReadScale pins the ×100 read quirk on both volume families.
-func TestVolumeReadScale(t *testing.T) {
+// TestVolumeReadScaleIsPlainWire pins ReadScale = 1 on both volume families: 32R
+// firmware 3.4.0 returns the plain 0..1 wire position on read, so no read-side
+// scaling is applied before the taper. Regression guard for the bogus ×100 that
+// made a -6 dB fader (wire 0.746) read back as ~-83 dB.
+func TestVolumeReadScaleIsPlainWire(t *testing.T) {
 	for _, path := range []string{"line/ch5/volume", "aux/ch3/volume"} {
 		spec, ok := Lookup(path)
 		if !ok {
 			t.Fatalf("Lookup(%q) = _, false; want a match", path)
 		}
-		if spec.ReadScale != 100 {
-			t.Errorf("Lookup(%q).ReadScale = %v, want 100", path, spec.ReadScale)
+		if spec.ReadScale != 1 {
+			t.Errorf("Lookup(%q).ReadScale = %v, want 1", path, spec.ReadScale)
 		}
 	}
 }
