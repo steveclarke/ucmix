@@ -215,9 +215,8 @@ func TestListPresets(t *testing.T) {
 	}
 }
 
-func TestVolumeReadScale(t *testing.T) {
-	b := New(map[string]any{"line/ch1/volume": float32(0.5)})
-	b.VolumeReadScale = true
+func TestSnapshotVolumeIsPlainWire(t *testing.T) {
+	b := New(map[string]any{"line/ch1/volume": float32(0.746)})
 	addr := startBoard(t, b)
 
 	c := dial(t, addr)
@@ -226,10 +225,10 @@ func TestVolumeReadScale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 0.5 surfaced ×100 = 50.
-	v, ok := toFloat(flat["line/ch1/volume"])
-	if !ok || v < 49.99 || v > 50.01 {
-		t.Errorf("scaled volume = %v (ok=%v), want ~50", flat["line/ch1/volume"], ok)
+	// The ZB surfaces the seed value unscaled — a real 32R returns 0..1 on read.
+	v, ok := flat["line/ch1/volume"].(float64)
+	if !ok || v < 0.7459 || v > 0.7461 {
+		t.Errorf("volume = %v (ok=%v), want ~0.746", flat["line/ch1/volume"], ok)
 	}
 }
 

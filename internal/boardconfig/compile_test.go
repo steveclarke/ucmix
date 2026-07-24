@@ -134,9 +134,9 @@ func TestCompileSugar(t *testing.T) {
 	if d := byPath["line/ch1/adc_src"]; approx(toF(d.WireValue), 25.0/32.0, 1e-9) == false {
 		t.Errorf("line/ch1/adc_src wire = %v, want 0.78125", d.WireValue)
 	}
-	// volume: -6 dB → pos 0.746 × ReadScale 100 = 74.6 (snapshot scale).
-	if d := byPath["aux/ch1/volume"]; approx(toF(d.WireValue), 74.6, 1e-6) == false {
-		t.Errorf("aux/ch1/volume wire = %v, want ~74.6", d.WireValue)
+	// volume: -6 dB → pos 0.746 × ReadScale 1 = 0.746 (plain-wire snapshot scale).
+	if d := byPath["aux/ch1/volume"]; approx(toF(d.WireValue), 0.746, 1e-6) == false {
+		t.Errorf("aux/ch1/volume wire = %v, want ~0.746", d.WireValue)
 	}
 	// pre2 → auxpremode 0.5 enum float, human kept as the name.
 	if d := byPath["aux/ch1/auxpremode"]; toF(d.WireValue) != 0.5 || d.HumanValue != "pre2" {

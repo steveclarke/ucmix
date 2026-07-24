@@ -210,8 +210,38 @@ func (c *Client) Get(path string) (any, bool) {
 			return spec.Taper.FromWire(pos), true
 		}
 		return pos, true
+	case schema.KindChars:
+		return humanizeColor(raw), true
 	default:
 		return raw, true
+	}
+}
+
+// humanizeColor normalizes a stored color to its RGBA byte form so the read is
+// symmetric with the write (which parses an RGB(A) hex string into these bytes).
+// A snapshot stores the color ABGR-packed into an integer — the little-endian
+// read of the wire bytes R,G,B,A — so it is unpacked back to [R,G,B,A]; a live
+// PC delta already carries the bytes and passes through. The CLI renders the
+// bytes as hex (e.g. []byte{0x4e,0xd2,0xff,0xff} → "4ed2ffff").
+func humanizeColor(raw any) any {
+	if p, ok := toUint32(raw); ok {
+		return []byte{byte(p), byte(p >> 8), byte(p >> 16), byte(p >> 24)}
+	}
+	return raw
+}
+
+// toUint32 coerces an integer color value (as ZB decodes it — int or int64) to
+// a uint32. Non-integer kinds (e.g. a []byte delta) report false.
+func toUint32(v any) (uint32, bool) {
+	switch n := v.(type) {
+	case int:
+		return uint32(n), true
+	case int64:
+		return uint32(n), true
+	case int32:
+		return uint32(n), true
+	default:
+		return 0, false
 	}
 }
 

@@ -153,11 +153,10 @@ func confirmReset(yes bool) (proceed bool, err error) {
 // writeDesired writes each desired setting through client.Set in compiled order.
 // It returns the number of settings written and the first write error.
 //
-// Read-scale seam: the value written is the HUMAN value, sent through
-// client.Set, which applies the key's taper (human -> 0..1) and never the
-// read-scale. So a -6 dB fader is written as Set(path, -6.0) -> wire 0.746, not
-// the read-scale 74.6 that would pin the fader. See applyValueFor for the few
-// keys whose wire form must be written verbatim (color, enum floats).
+// The value written is the HUMAN value, sent through client.Set, which applies
+// the key's taper (human -> 0..1) and never a read-scale. So a -6 dB fader is
+// written as Set(path, -6.0) -> wire 0.746. See applyValueFor for the few keys
+// whose wire form must be written verbatim (color, enum floats).
 func writeDesired(ctx context.Context, c *ucmix.Client, desired []boardconfig.Desired, g *globals) (int, error) {
 	if !g.json {
 		fmt.Println(ui.Header(fmt.Sprintf("applying %d settings…", len(desired))))
@@ -180,7 +179,7 @@ func writeDesired(ctx context.Context, c *ucmix.Client, desired []boardconfig.De
 //   - chars (color): the WireValue carries the full 8-digit RGBA; the HumanValue
 //     may be 6-digit and Set does NOT append the alpha, so the wire form is used.
 //   - float with a numeric human (fader/send/threshold/release/patch/Hz): the
-//     HumanValue is written and Set applies the taper (never the read-scale).
+//     HumanValue is written and Set applies the taper (never a read-scale).
 //   - float with a non-numeric human (off / raw: / enum): the WireValue is the
 //     exact 0..1 wire position. For a nil/passthrough taper it is written
 //     directly; for a real taper it is inverted through FromWire so Set re-tapers
