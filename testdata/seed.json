@@ -7,5 +7,12 @@
   "line/ch2/mute": 1.0,
   "line/ch3/username": "Vocal",
   "line/ch3/mute": 0.0,
-  "main/ch1/volume": 0.746
+  "main/ch1/volume": 0.746,
+  "aux/ch1/username": "Steve",
+  "aux/ch1/volume": 0.5,
+  "aux/ch1/link": 0.0,
+  "aux/ch1/limit/limiteron": 0.0,
+  "aux/ch1/limit/threshold": 0.5,
+  "aux/ch1/limit/release": 0.5,
+  "aux/ch2/username": "Drums"
 }
