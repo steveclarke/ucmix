@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveclarke/ucmix/internal/errs"
@@ -69,15 +68,13 @@ func newLsProjectsCmd(g *globals) *cobra.Command {
 	}
 }
 
-// newLsScenesCmd builds `ls scenes <project>`. The client has no per-project
-// scene lister (and even ListProjects' JM body is uncaptured against real
-// hardware), so this lists whatever ListProjects returns and states the gap
-// rather than inventing board behavior. On a real board ListProjects returns
-// project names, not scene paths.
+// newLsScenesCmd builds `ls scenes <project>`: list the scenes stored in a
+// project. project is a project name from `ls projects` (e.g.
+// "01.Sevenview Live.proj").
 func newLsScenesCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "scenes <project>",
-		Short: "List presets for a project (no per-project scene lister yet)",
+		Short: "List scenes in a project on the mixer",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project := args[0]
@@ -87,22 +84,19 @@ func newLsScenesCmd(g *globals) *cobra.Command {
 			}
 			defer func() { _ = c.Close() }()
 
-			projects, err := c.ListProjects(cmd.Context())
+			scenes, err := c.ListScenes(cmd.Context(), project)
 			if err != nil {
-				return listErr("listing presets failed", err)
+				return listErr("listing scenes failed", err)
 			}
-			names := make([]string, len(projects))
-			for i, p := range projects {
-				names[i] = p.Name
+			names := make([]string, len(scenes))
+			for i, s := range scenes {
+				names[i] = s.Name
 			}
 
-			const note = "note: the client has no per-project scene lister; " +
-				"showing every preset ListProjects returns"
 			if g.json {
-				return printJSON(map[string]any{"project": project, "presets": names, "note": note})
+				return printJSON(map[string]any{"project": project, "scenes": names})
 			}
-			fmt.Fprintln(os.Stderr, ui.Hint(note))
-			printNames(names, "no presets found")
+			printNames(names, "no scenes found")
 			return nil
 		},
 	}

@@ -15,8 +15,11 @@ package fakeboard
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/steveclarke/ucmix/internal/proto"
@@ -32,9 +35,9 @@ type Board struct {
 	// StaleAfter, when > 0, stops delivering live delta frames to a connection
 	// once that many deltas have been SENT to it (stale-subscription).
 	StaleAfter int
-	// SuppressListReply, when true, silently drops the Listpresets request and
-	// sends no reply — reproducing a real board that never answers a preset-list
-	// request, which would hang an unbounded ListProjects wait.
+	// SuppressListReply, when true, silently drops the preset-list request (FR)
+	// and sends no reply — reproducing a board that never answers, which would
+	// hang an unbounded ListProjects/ListScenes wait.
 	SuppressListReply bool
 
 	mu       sync.Mutex // guards tree access grouping, scenes, conns, subscribed, accepted
@@ -185,6 +188,8 @@ func (b *Board) handleFrame(c *conn, f proto.Frame) {
 		b.broadcast(c, proto.Encode(f))
 	case proto.CodeJM:
 		b.handleJM(c, f)
+	case proto.CodeFR:
+		b.handleFR(c, f)
 	case proto.CodeKA:
 		// Keep-alive: accepted silently, no response.
 	default:
@@ -258,11 +263,6 @@ func (b *Board) handleJM(c *conn, f proto.Frame) {
 		}
 		_ = json.Unmarshal(body, &cmd)
 		b.storePreset(cmd.PresetFile)
-	case "Listpresets":
-		if b.SuppressListReply {
-			return // real-board behavior: no reply, so an unbounded wait hangs
-		}
-		b.listPresets(c)
 	}
 }
 
@@ -298,22 +298,88 @@ func (b *Board) storePreset(name string) {
 	b.mu.Unlock()
 }
 
-// listPresets replies to the requesting connection with a JM frame listing the
-// stored scene names: {"id":"Listpresets","presets":[…]}. Both ends of this
-// contract live in-repo, so JM (not FD) is used for simplicity.
-func (b *Board) listPresets(c *conn) {
-	b.mu.Lock()
-	names := make([]string, 0, len(b.scenes))
-	for n := range b.scenes {
-		names = append(names, n)
+// handleFR answers a preset-list request (FR) with FD chunks carrying a canned
+// {"files":[…]} body, matching the real board's Projects/Scenes screen. The
+// projects reply is split across two FD chunks so the client's reassembly path
+// is exercised end to end, not just the parse. Requests other than the known
+// project/scene resources, and a board with SuppressListReply set, get no reply.
+func (b *Board) handleFR(c *conn, f proto.Frame) {
+	if b.SuppressListReply {
+		return // board that never answers, so an unbounded wait hangs
 	}
-	b.mu.Unlock()
-	reply := struct {
-		ID      string   `json:"id"`
-		Presets []string `json:"presets"`
-	}{"Listpresets", names}
-	c.write(proto.Encode(proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(reply)}))
+	resource := frResource(f.Payload)
+	var body []byte
+	switch {
+	case resource == "Listpresets/proj":
+		body = cannedProjectsJSON
+	case strings.HasPrefix(resource, "Listpresets/proj/"):
+		body = cannedScenesJSON
+	default:
+		return // unknown resource: no reply
+	}
+	id := binary.LittleEndian.Uint16(f.Payload[0:2])
+	for _, chunk := range splitFDChunks(body, 2) {
+		payload := proto.BuildFDPayload(id, chunk.offset, uint32(len(body)), chunk.data)
+		c.write(proto.Encode(proto.Frame{Code: proto.CodeFD, Payload: payload}))
+	}
 }
+
+// frResource extracts the null-terminated resource string from an FR payload
+// (2-byte id prefix, then the resource cstr).
+func frResource(payload []byte) string {
+	if len(payload) < 2 {
+		return ""
+	}
+	rest := payload[2:]
+	if i := bytes.IndexByte(rest, 0); i >= 0 {
+		return string(rest[:i])
+	}
+	return string(rest)
+}
+
+// fdChunk is one slice of a body to be sent as an FD frame.
+type fdChunk struct {
+	offset uint32
+	data   []byte
+}
+
+// splitFDChunks divides body into n contiguous chunks (the last taking any
+// remainder). A body shorter than n bytes yields a single chunk.
+func splitFDChunks(body []byte, n int) []fdChunk {
+	if n < 2 || len(body) < n {
+		return []fdChunk{{offset: 0, data: body}}
+	}
+	size := len(body) / n
+	chunks := make([]fdChunk, 0, n)
+	for off := 0; off < len(body); off += size {
+		end := off + size
+		if len(chunks) == n-1 || end > len(body) {
+			end = len(body) // last chunk carries the remainder
+		}
+		chunks = append(chunks, fdChunk{offset: uint32(off), data: body[off:end]})
+		if end == len(body) {
+			break
+		}
+	}
+	return chunks
+}
+
+// cannedProjectsJSON is the fake board's project list: two occupied projects
+// (dir:true) and one empty slot, matching the shape a 32R returns.
+var cannedProjectsJSON = []byte(`{"files":[` +
+	`{"name":"01.Main Live.proj","title":"Main Live","dir":true},` +
+	`{"name":"02.Rehearsal.proj","title":"Rehearsal","dir":true},` +
+	`{"name":"03._ Empty Location _.proj","title":"* Empty Location *"}` +
+	`]}`)
+
+// cannedScenesJSON is the fake board's scene list for any project: the project
+// config file, two occupied scenes, and one empty slot.
+var cannedScenesJSON = []byte(`{"files":[` +
+	`{"name":"Main Live.cnfg","title":"Main Live.cnfg"},` +
+	`{"name":"01.Opening Set.scn","title":"Opening Set"},` +
+	`{"name":"02.Encore.scn","title":"Encore"},` +
+	`{"name":"03._ Empty Location _.scn","title":"* Empty Location *"}` +
+	`]}`)
 
 // pushZBToAll sends a fresh full ZB snapshot to every subscribed connection.
 func (b *Board) pushZBToAll() {

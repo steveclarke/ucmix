@@ -39,6 +39,7 @@ var (
 	CodeJM = [2]byte{'J', 'M'}
 	CodeKA = [2]byte{'K', 'A'}
 	CodeMS = [2]byte{'M', 'S'}
+	CodeFR = [2]byte{'F', 'R'}
 	CodeFD = [2]byte{'F', 'D'}
 	CodeCK = [2]byte{'C', 'K'}
 )

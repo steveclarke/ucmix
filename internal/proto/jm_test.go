@@ -117,11 +117,6 @@ func TestJMCommandBodies(t *testing.T) {
 			`{"id":"RestorePreset","url":"presets","presetTarget":"","presetTargetSlave":0,"presetFile":"presets/proj/01.Showfile.proj/02.Scene.scn"}`,
 		},
 		{
-			"Listpresets",
-			ListPresetsCmd{URL: "presets/proj"},
-			`{"id":"Listpresets","url":"presets/proj"}`,
-		},
-		{
 			"Subscribe",
 			DefaultSubscribeCmd(),
 			`{"id":"Subscribe","clientName":"UC-Surface","clientInternalName":"ucremoteapp","clientType":"StudioLive API","clientDescription":"User","clientIdentifier":"133d066a919ea0ea","clientOptions":"perm users levl redu rtan","clientEncoding":23106}`,

@@ -21,26 +21,38 @@ load test_helper
   [[ "$output" == *"recall"* ]]
 }
 
-@test "ls projects lists stored presets" {
-  "${UCMIX_BIN}" store proj1 sceneA
+@test "ls projects lists the board's projects" {
   run "${UCMIX_BIN}" ls projects
   [ "$status" -eq 0 ]
-  [[ "$output" == *"proj1"* ]]
+  [[ "$output" == *"Main Live"* ]]
+  [[ "$output" == *"Rehearsal"* ]]
+  # Empty slots are dropped, not listed.
+  [[ "$output" != *"Empty Location"* ]]
 }
 
 @test "ls projects --json is valid JSON" {
-  "${UCMIX_BIN}" store proj1 sceneA
   run "${UCMIX_BIN}" ls projects --json
   [ "$status" -eq 0 ]
   echo "$output" | json_valid
   [[ "$output" == *"\"projects\""* ]]
+  [[ "$output" == *"Main Live"* ]]
 }
 
-@test "ls scenes states the missing-lister gap" {
-  "${UCMIX_BIN}" store proj1 sceneA
-  run "${UCMIX_BIN}" ls scenes proj1
+@test "ls scenes lists a project's scenes" {
+  run "${UCMIX_BIN}" ls scenes "01.Main Live.proj"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no per-project scene lister"* ]]
+  [[ "$output" == *"Opening Set"* ]]
+  [[ "$output" == *"Encore"* ]]
+  # The .cnfg entry and empty slots are dropped.
+  [[ "$output" != *".cnfg"* ]]
+  [[ "$output" != *"Empty Location"* ]]
+}
+
+@test "ls scenes --json is valid JSON" {
+  run "${UCMIX_BIN}" ls scenes "01.Main Live.proj" --json
+  [ "$status" -eq 0 ]
+  echo "$output" | json_valid
+  [[ "$output" == *"\"scenes\""* ]]
 }
 
 @test "reset without --yes refuses in a non-tty" {

@@ -194,7 +194,7 @@ func TestIntegrationSetManyReusesOneConnection(t *testing.T) {
 // ErrListTimeout within the bound instead of hanging forever.
 func TestIntegrationListProjectsTimesOutWhenBoardSilent(t *testing.T) {
 	b := fakeboard.New(map[string]any{})
-	b.SuppressListReply = true // never answers Listpresets, like a real board
+	b.SuppressListReply = true // never answers the FR preset-list request, like a silent board
 	addr := startFakeboard(t, b)
 	c := connectReal(t, addr)
 

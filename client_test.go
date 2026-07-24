@@ -616,24 +616,29 @@ func TestListProjectsRoutesReplyOutOfMergeLoop(t *testing.T) {
 		done <- p
 	}()
 
-	// Wait for the request to be sent, then deliver the JM reply.
+	// Wait for the FR request to be sent, then deliver the FD reply. The reply
+	// arrives as two chunks to exercise reassembly out of the merge loop.
 	waitFor(t, func() bool {
 		for _, f := range ft.sentFrames() {
-			if id, _ := jmField(f.Payload, "id"); id == "Listpresets" {
+			if f.Code == proto.CodeFR {
 				return true
 			}
 		}
 		return false
 	})
-	reply := struct {
-		ID      string   `json:"id"`
-		Presets []string `json:"presets"`
-	}{"Listpresets", []string{"MainLive", "Rehearsal"}}
-	ft.deliver(proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(reply)})
+	body := []byte(`{"files":[` +
+		`{"name":"01.MainLive.proj","title":"MainLive","dir":true},` +
+		`{"name":"02.Rehearsal.proj","title":"Rehearsal","dir":true},` +
+		`{"name":"03._ Empty Location _.proj","title":"* Empty Location *"}` +
+		`]}`)
+	half := len(body) / 2
+	ft.deliver(proto.Frame{Code: proto.CodeFD, Payload: proto.BuildFDPayload(1, 0, uint32(len(body)), body[:half])})
+	ft.deliver(proto.Frame{Code: proto.CodeFD, Payload: proto.BuildFDPayload(1, uint32(half), uint32(len(body)), body[half:])})
 
 	select {
 	case p := <-done:
-		if len(p) != 2 || p[0].Name != "MainLive" || p[1].Name != "Rehearsal" {
+		// Only the two dir:true projects come back; the empty slot is dropped.
+		if len(p) != 2 || p[0].Name != "01.MainLive.proj" || p[1].Title != "Rehearsal" {
 			t.Fatalf("projects = %+v", p)
 		}
 	case <-time.After(2 * time.Second):

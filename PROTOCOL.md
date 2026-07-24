@@ -78,8 +78,9 @@ match on the connIdentity a request was sent with rather than hard-coding one.
 | `PS` | Param string — names, icon IDs | `key\0\0\0` + UTF-8 + trailing `\0` |
 | `MS` | Fader positions, bulk | per-type arrays of linear positions |
 | `ZB` | Full state snapshot | zlib-compressed nested tree |
-| `FD` | File / list data | scene and preset list transfers |
-| `CK` | Housekeeping | — |
+| `FR` | File request — enumerate presets | `id` u16 LE + resource cstr + arg cstr |
+| `FD` | File data — chunked reply to `FR` | 14-byte header (id/offset/total/size) + JSON chunk |
+| `CK` | Snapshot chunk | 16-byte header (tag/offset/total/size) + ZB chunk |
 | `JM` | JSON message — presets, scenes, reset | 4-byte LE JSON length + JSON body |
 | `KA` | Keep-alive | empty (length 6) |
 | `Hello` | Handshake | advertises the client's UDP metering port |
@@ -183,11 +184,6 @@ use generic placeholders — substitute real project and scene file names.
   "presetFile": "presets/proj/<PROJECT>.proj/<NN>.<name>.scn" }
 ```
 
-**List** stored presets under a namespace (e.g. `presets/proj`, `presets/channel`):
-```json
-{ "id": "Listpresets", "url": "presets/proj" }
-```
-
 **Reset** the mixer. The two scope flags control what is cleared:
 ```json
 { "id": "ResetMixer", "resetSceneSettings": 1, "resetProjectSettings": 0,
@@ -196,6 +192,50 @@ use generic placeholders — substitute real project and scene file names.
 - `resetSceneSettings: 1` clears scene-level settings.
 - `resetProjectSettings: 1` clears project-level settings.
 - **Both flags = 1 is a full factory wipe** — names, input patch, and all mixes are cleared.
+
+## FR / FD — enumerating presets
+
+Listing projects and scenes uses the file-request pair `FR` → `FD`, not `JM`. This is what
+UC Surface sends for its Projects/Scenes screen; a real 32R answers immediately. Confirmed
+against a capture (`internal/proto/testdata/uc-surface-listpresets.pcap`).
+
+**Request** (`FR`) — payload is `id` (u16 LE) followed by two null-terminated ASCII
+strings, a resource and an argument:
+
+| List | resource | arg |
+|------|----------|-----|
+| Projects | `Listpresets/proj` | (empty) |
+| Scenes in a project | `Listpresets/proj/<NN>.<name>.proj` | (empty) |
+| Channel presets in a category | `Listpresets/channel` | `<category>` |
+
+For projects and scenes the arg is empty, so the payload ends with the resource string
+followed by two null bytes.
+
+**Reply** (`FD`) — the board streams the body across one or more `FD` frames. Each payload
+begins with a 14-byte header, then chunk data:
+
+```
+[ id u16 LE ][ offset u32 LE ][ total u32 LE ][ more u16 LE ][ size u16 LE ][ data ]
+```
+
+`offset` is the chunk's position in the full body; `total` is the full body size; `size`
+is this chunk's length. Concatenate chunk data in order; the body is complete when
+`offset + size == total` (same rule as `CK`, only the header differs). A ~7 KB body arrives
+as a 4096-byte chunk plus the remainder.
+
+The reassembled body is JSON:
+
+```json
+{ "files": [
+  { "name": "01.Sevenview Live.proj", "title": "Sevenview Live", "dir": true },
+  { "name": "04._ Empty Location _.proj", "title": "* Empty Location *" }
+] }
+```
+
+`dir: true` marks a project (a folder of scenes). The board reports a fixed roster of slots
+(100 projects, 20 scenes per project); unused slots carry the title `* Empty Location *`. A
+scene list also leads with the project's `.cnfg` config file. ucmix drops empty slots and
+the config entry, returning only occupied entries.
 
 ## Gotchas
 
