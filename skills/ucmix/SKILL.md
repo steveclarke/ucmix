@@ -109,3 +109,8 @@ rather than trusting this list to be complete.
   loops with fresh-`get` verification over `apply` until this is resolved.
 - HPF (Hz), limiter release curve, and reverb-type enums are not fully calibrated —
   their humanized conversions are approximate. Use raw values when exactness matters.
+- Some UCNET parameters have **no control in UC Surface** (e.g. an FX return's Main/LR
+  assign, `fxreturn/chN/lr`). Writing one leaves the board in a state the operator cannot
+  see or undo from the console. Prefer a change that maps to a visible UC Surface control
+  (e.g. pull the FX return fader down for a dry main, not an LR unassign), and when a write
+  has no UI equivalent, say so.
