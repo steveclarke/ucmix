@@ -43,7 +43,11 @@ type KeySpec struct {
 	Pattern string
 	// Kind is the wire representation.
 	Kind Kind
-	// Writable reports whether the key is in the verified-write table.
+	// Writable reports whether the key is a writable control. The line/aux/fx/
+	// fxreturn rows are in the captured verified-write table; the extended bus
+	// rows (sub, main, return, fxbus, filtergroup, autofiltergroup, talkback, geq)
+	// are the same writable controls on sibling buses, with reads and tapers
+	// confirmed against the 32R snapshot rather than a separate write capture.
 	Writable bool
 	// ReadScale divides a raw read to reach the 0..1 wire position before the
 	// taper. It is 1 for every known key on 32R firmware 3.4.0: the board returns
@@ -57,8 +61,10 @@ type KeySpec struct {
 	Taper taper.Taper
 }
 
-// specs is the seed table: one row per verified-write key family. Keys that are
-// bare 0..1 floats with no decoded human unit (pan, preampgain, auxpremode, the
+// specs is the schema table: one row per known key family. The line/aux/fx/
+// fxreturn rows seed from the verified-write capture; the extended-bus rows
+// apply the same verified encodings and tapers to their sibling buses. Keys that
+// are bare 0..1 floats with no decoded human unit (pan, preampgain, auxpremode, the
 // reverb type enum, EQ/comp params) carry a nil Taper — a documented raw
 // pass-through, not an oversight.
 var specs = []KeySpec{
@@ -96,6 +102,12 @@ var specs = []KeySpec{
 	{Pattern: "line/ch{n}/comp/attack", Kind: KindFloat, Writable: true, ReadScale: 1},
 	{Pattern: "line/ch{n}/comp/release", Kind: KindFloat, Writable: true, ReadScale: 1},
 	{Pattern: "line/ch{n}/comp/gain", Kind: KindFloat, Writable: true, ReadScale: 1},
+	// Gate/limiter: on is bool; the limiter threshold/release share the aux
+	// limiter tapers (same DSP block). limit/reduction is a read-only meter → raw.
+	{Pattern: "line/ch{n}/gate/on", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "line/ch{n}/limit/limiteron", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "line/ch{n}/limit/threshold", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.LimiterThresh},
+	{Pattern: "line/ch{n}/limit/release", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Release},
 
 	// --- aux/chN — monitor mix master ---
 	{Pattern: "aux/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
@@ -103,6 +115,13 @@ var specs = []KeySpec{
 	// link/linkmaster read as float on aux but encode 1.0/0.0 → keep KindBool.
 	{Pattern: "aux/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},
 	{Pattern: "aux/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "aux/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "aux/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "aux/ch{n}/solo", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "aux/ch{n}/comp/on", Kind: KindBool, Writable: true, ReadScale: 1},
+	// aux{m} = matrix send from this monitor mix to aux m. adc_src = source patch.
+	{Pattern: "aux/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "aux/ch{n}/adc_src", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.InputPatch},
 	// auxpremode: 0.5 = Pre 2 — an enum-ish raw float, no taper.
 	{Pattern: "aux/ch{n}/auxpremode", Kind: KindFloat, Writable: true, ReadScale: 1},
 	{Pattern: "aux/ch{n}/limit/limiteron", Kind: KindBool, Writable: true, ReadScale: 1},
@@ -115,8 +134,118 @@ var specs = []KeySpec{
 
 	// --- fxreturn/chN — FX return ---
 	{Pattern: "fxreturn/ch{n}/username", Kind: KindString, Writable: true, ReadScale: 1},
+	{Pattern: "fxreturn/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
 	{Pattern: "fxreturn/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "fxreturn/ch{n}/FX{A..H}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "fxreturn/ch{n}/adc_src", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.InputPatch},
 	{Pattern: "fxreturn/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxreturn/ch{n}/solo", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxreturn/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxreturn/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxreturn/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxreturn/ch{n}/lr", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxreturn/ch{n}/comp/on", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// --- extended buses — sub, main, return, fxbus, filtergroup (DCA),
+	//     autofiltergroup, talkback, geq ---
+	//
+	// These families carry the same control leaves as the line/aux channel strip
+	// and use the same wire encodings. They are not in the captured verified-write
+	// table, but their reads and tapers are confirmed against the 32R snapshot:
+	// master faders and sends ride the single level taper the board uses
+	// everywhere (see the Fader/SendLevel note in package taper), toggles encode
+	// 1.0/0.0, and adc_src is input÷32.
+	//
+	// Point-confirmed at wire 0.746 (-6 dB) in the snapshot: filtergroup,
+	// autofiltergroup, fxreturn and talkback faders/sends. sub/main/return/fxbus
+	// faders and the aux/sub/main/return matrix sends read 0 (bottom) — the
+	// verified fader/send law applied to a sibling control, not a new curve.
+	//
+	// Left raw here on purpose (uncalibrated or not a setpoint): DCA membership
+	// matrices (lineN, returnN, mute_auxN, mute_fxN), states/* mirror flags,
+	// limit/reduction meters, adc_srcN slot lists, EQ/comp/gate/geq band params,
+	// the HPF Hz curve, and the reverb type/param enums.
+
+	// sub/chN — subgroup master
+	{Pattern: "sub/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
+	{Pattern: "sub/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "sub/ch{n}/adc_src", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.InputPatch},
+	{Pattern: "sub/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "sub/ch{n}/solo", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "sub/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "sub/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "sub/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "sub/ch{n}/comp/on", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "sub/ch{n}/limit/limiteron", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "sub/ch{n}/limit/threshold", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.LimiterThresh},
+	{Pattern: "sub/ch{n}/limit/release", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Release},
+
+	// main/chN — main bus master
+	{Pattern: "main/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
+	{Pattern: "main/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "main/ch{n}/adc_src", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.InputPatch},
+	{Pattern: "main/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "main/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "main/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "main/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "main/ch{n}/comp/on", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "main/ch{n}/limit/limiteron", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "main/ch{n}/limit/threshold", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.LimiterThresh},
+	{Pattern: "main/ch{n}/limit/release", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Release},
+
+	// return/chN — tape/aux return
+	{Pattern: "return/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
+	{Pattern: "return/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "return/ch{n}/FX{A..H}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "return/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/solo", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/lr", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/comp/on", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/limit/limiteron", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "return/ch{n}/limit/threshold", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.LimiterThresh},
+	{Pattern: "return/ch{n}/limit/release", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Release},
+
+	// fxbus/chN — FX bus master
+	{Pattern: "fxbus/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
+	{Pattern: "fxbus/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxbus/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxbus/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxbus/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "fxbus/ch{n}/comp/on", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// filtergroup/chN — DCA master (level/mute/solo over its members).
+	// fx{m} = DCA reverb send (lowercase/numeric leaf).
+	{Pattern: "filtergroup/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
+	{Pattern: "filtergroup/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "filtergroup/ch{n}/fx{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "filtergroup/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "filtergroup/ch{n}/solo", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// autofiltergroup/chN — automatic DCA master
+	{Pattern: "autofiltergroup/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
+	{Pattern: "autofiltergroup/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "autofiltergroup/ch{n}/fx{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "autofiltergroup/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "autofiltergroup/ch{n}/solo", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// talkback/chN — talkback channel
+	{Pattern: "talkback/ch{n}/volume", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.Fader},
+	{Pattern: "talkback/ch{n}/aux{m}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "talkback/ch{n}/FX{A..H}", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.SendLevel},
+	{Pattern: "talkback/ch{n}/adc_src", Kind: KindFloat, Writable: true, ReadScale: 1, Taper: taper.InputPatch},
+	{Pattern: "talkback/ch{n}/mute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "talkback/ch{n}/link", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "talkback/ch{n}/linkmaster", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "talkback/ch{n}/panlinkstate", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "talkback/ch{n}/lr", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "talkback/ch{n}/polarity", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// geq/chN — graphic EQ. Only the enable toggle is decoded; the 31 band gains
+	// (gainN), source and ston stay raw.
+	{Pattern: "geq/ch{n}/on", Kind: KindBool, Writable: true, ReadScale: 1},
 }
 
 // compiled pairs each spec with its anchored regexp, built once at init.
