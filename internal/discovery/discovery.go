@@ -16,12 +16,31 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/steveclarke/ucmix/internal/config"
 	"github.com/steveclarke/ucmix/internal/proto"
 	"golang.org/x/sys/unix"
 )
 
 // Port is the UDP port StudioLive mixers broadcast their presence on.
 const Port = 47809
+
+// probeTimeout bounds each control-port reachability check made while resolving
+// a serial that was announced from more than one interface.
+const probeTimeout = 300 * time.Millisecond
+
+// probeControl reports whether the mixer's UCNET control port answers a TCP
+// connection at ip. It is the reachability seam — tests swap it to decide which
+// interface wins without touching the network. The default dials the same TCP
+// control port (config.DefaultPort) the transport later connects on, so the
+// interface discovery prefers is the interface a connection can actually use.
+var probeControl = func(ip string) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, config.DefaultPort), probeTimeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
 
 // fragmentOffset is where the null-delimited identity fragments begin within a
 // broadcast: 12 bytes of UCNET header/code/connID, then 20 bytes the reference
@@ -78,7 +97,10 @@ func Scan(ctx context.Context, timeout time.Duration) ([]Mixer, error) {
 		deadline = dl
 	}
 
-	found := map[string]Mixer{}
+	// A mixer with two NICs (e.g. a 32R's control and AVB interfaces) announces
+	// the same serial from each IP, so candidates are collected per serial and
+	// the reachable interface is chosen after the listen window closes.
+	found := map[string]map[string]Mixer{}
 	buf := make([]byte, 2048)
 	for ctx.Err() == nil {
 		now := time.Now()
@@ -107,12 +129,15 @@ func Scan(ctx context.Context, timeout time.Duration) ([]Mixer, error) {
 		if !ok {
 			continue
 		}
-		found[m.Serial] = m
+		if found[m.Serial] == nil {
+			found[m.Serial] = map[string]Mixer{}
+		}
+		found[m.Serial][m.IP] = m
 	}
 
 	out := make([]Mixer, 0, len(found))
-	for _, m := range found {
-		out = append(out, m)
+	for _, byIP := range found {
+		out = append(out, selectReachable(byIP))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
@@ -121,6 +146,30 @@ func Scan(ctx context.Context, timeout time.Duration) ([]Mixer, error) {
 		return out[i].Serial < out[j].Serial
 	})
 	return out, nil
+}
+
+// selectReachable picks one Mixer from the broadcasts that share a serial. A
+// single interface needs no choice. When a serial was announced from several
+// IPs (a 32R broadcasts from both its control NIC, where TCP 53000 is open, and
+// its AVB NIC, where it is closed), the candidates are ordered by IP so the
+// outcome is deterministic, then the first whose control port answers wins. If
+// none answer, the lowest IP is kept rather than whichever datagram happened to
+// arrive last.
+func selectReachable(byIP map[string]Mixer) Mixer {
+	cands := make([]Mixer, 0, len(byIP))
+	for _, m := range byIP {
+		cands = append(cands, m)
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].IP < cands[j].IP })
+	if len(cands) == 1 {
+		return cands[0]
+	}
+	for _, m := range cands {
+		if probeControl(m.IP) {
+			return m
+		}
+	}
+	return cands[0]
 }
 
 // parseBroadcast decodes one datagram into a Mixer. It returns ok=false for any

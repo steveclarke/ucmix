@@ -125,3 +125,57 @@ func TestScanDedupesBySerial(t *testing.T) {
 		t.Errorf("Scan not sorted by name: %+v", mixers)
 	}
 }
+
+// twoNIC feeds the same serial from a control IP and an AVB IP, mirroring a 32R
+// that broadcasts from both interfaces.
+func twoNIC(controlIP, avbIP string) *fakePacketConn {
+	return &fakePacketConn{pkts: []struct {
+		data []byte
+		addr net.Addr
+	}{
+		{makeBroadcast("StudioLive 32R", "AAA"), &net.UDPAddr{IP: net.ParseIP(controlIP), Port: 47809}},
+		{makeBroadcast("StudioLive 32R", "AAA"), &net.UDPAddr{IP: net.ParseIP(avbIP), Port: 47809}},
+	}}
+}
+
+func TestScanPrefersReachableControlPort(t *testing.T) {
+	const controlIP, avbIP = "192.168.77.82", "192.168.77.129"
+
+	origListen, origProbe := listenUDP, probeControl
+	listenUDP = func(int) (net.PacketConn, error) { return twoNIC(controlIP, avbIP), nil }
+	probeControl = func(ip string) bool { return ip == controlIP }
+	defer func() { listenUDP, probeControl = origListen, origProbe }()
+
+	mixers, err := Scan(context.Background(), 200*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(mixers) != 1 {
+		t.Fatalf("Scan found %d mixers, want 1: %+v", len(mixers), mixers)
+	}
+	if mixers[0].IP != controlIP {
+		t.Errorf("Scan chose %s, want the reachable control IP %s", mixers[0].IP, controlIP)
+	}
+}
+
+func TestScanDeterministicWhenNoneReachable(t *testing.T) {
+	const controlIP, avbIP = "192.168.77.82", "192.168.77.129"
+
+	origListen, origProbe := listenUDP, probeControl
+	// The AVB IP arrives last; without a deterministic fallback the last write
+	// would win. The lowest IP string (".129") must be chosen regardless.
+	listenUDP = func(int) (net.PacketConn, error) { return twoNIC(controlIP, avbIP), nil }
+	probeControl = func(string) bool { return false }
+	defer func() { listenUDP, probeControl = origListen, origProbe }()
+
+	mixers, err := Scan(context.Background(), 200*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(mixers) != 1 {
+		t.Fatalf("Scan found %d mixers, want 1: %+v", len(mixers), mixers)
+	}
+	if mixers[0].IP != avbIP {
+		t.Errorf("Scan chose %s, want the deterministic lowest IP %s", mixers[0].IP, avbIP)
+	}
+}
