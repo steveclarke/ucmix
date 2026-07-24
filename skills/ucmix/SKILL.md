@@ -92,7 +92,9 @@ rather than trusting this list to be complete.
 - `verify <config.yml>` / `apply <config.yml>` — board as code: diff / write a whole config
 - `recall <project> <scene>` / `store <project> <scene>` — mixer scenes
 - `reset` — factory reset (destructive; needs `--yes`)
-- `ls` — list stored presets
+- `ls projects` — list projects on the board; `ls scenes <project>` — list a project's
+  scenes. `<project>` is a name from `ls projects` (e.g. `01.Sevenview Live.proj`). Both
+  take `--json`.
 - `discover` / `setup` / `profile` / `config` — find/save/manage mixer connections
 
 ## Agent rules
@@ -112,11 +114,13 @@ rather than trusting this list to be complete.
 
 ## Known limitations
 
-- `ls` / project listing may not work on some real boards: the board may not answer the
-  preset-list request. It now fails with a clear timeout and hint instead of hanging.
+- `ls projects` / `ls scenes` list the board's presets over the FR/FD file-request
+  protocol (the same one UC Surface uses). A board that never answers fails with a clear
+  timeout and hint instead of hanging. Empty slots and the project config file are dropped
+  from the output; only occupied projects/scenes are shown.
 - `apply` writes over one connection with a library commit barrier and verifies on a
-  fresh connection (a fresh `get`), so it no longer depends on the project-list request
-  that can go unanswered. `set -f <file>` is the same batch write path without the verify.
+  fresh connection (a fresh `get`). `set -f <file>` is the same batch write path without
+  the verify.
 - HPF (Hz), limiter release curve, and reverb-type enums are not fully calibrated —
   their humanized conversions are approximate. Use raw values when exactness matters.
 - Some UCNET parameters have **no control in UC Surface** (e.g. an FX return's Main/LR

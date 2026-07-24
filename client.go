@@ -3,7 +3,6 @@ package ucmix
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -47,13 +46,15 @@ type Client struct {
 	commitDelay time.Duration // post-write hold applied by Set/SetMany; 0 = no barrier
 
 	ckAsm proto.ChunkAssembler // reassembles a CK-chunked snapshot; used only from the read goroutine
+	fdAsm proto.ChunkAssembler // reassembles an FD-chunked preset list; used only from the read goroutine
 
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 	closeErr  error
 
-	mu          sync.Mutex      // guards listWaiters
-	listWaiters []chan []string // registered ListProjects reply waiters
+	mu          sync.Mutex                // guards listWaiters and nextReqID
+	listWaiters []chan []proto.PresetFile // registered preset-list reply waiters
+	nextReqID   uint16                    // FR request id, incremented per list request
 }
 
 // Connect dials addr, sends the Subscribe handshake, and blocks until the board
@@ -120,8 +121,8 @@ func (c *Client) mergeLoop() {
 
 // handle applies one inbound frame to the tree and reports whether it was a ZB
 // snapshot (the signal Connect blocks on). PV/PS/PC become deltas; ZB replaces
-// the whole tree (a fresh ZB also arrives after recall/reset); JM replies are
-// routed to any pending request waiter.
+// the whole tree (a fresh ZB also arrives after recall/reset); FD chunks
+// reassemble into a preset-list reply routed to any pending list waiter.
 func (c *Client) handle(f proto.Frame) (isZB bool) {
 	switch f.Code {
 	case proto.CodePV:
@@ -156,34 +157,38 @@ func (c *Client) handle(f proto.Frame) (isZB bool) {
 			c.tree.LoadSnapshot(m)
 			return true
 		}
-	case proto.CodeJM:
-		c.handleJMReply(f.Payload)
+	case proto.CodeFD:
+		// The board answers a preset-list request (FR) with FD chunks;
+		// reassemble, then parse the completed JSON body and deliver it to the
+		// pending list waiter. fdAsm assumes one outstanding FR per connection —
+		// the CLI dials a fresh client per list, so only one reply is ever in
+		// flight. Concurrent lists on one Client would interleave and corrupt it.
+		chunk, err := proto.ParseFD(f.Payload)
+		if err != nil {
+			return false
+		}
+		body, complete := c.fdAsm.Add(chunk.Chunk)
+		if !complete {
+			return false
+		}
+		files, err := proto.ParsePresetList(body)
+		if err != nil {
+			return false
+		}
+		c.deliverList(files)
 	}
 	return false
 }
 
-// handleJMReply parses a JM reply body and delivers list results to any waiter.
-func (c *Client) handleJMReply(payload []byte) {
-	body := payload
-	if len(body) >= 4 {
-		body = body[4:]
-	}
-	var reply struct {
-		ID      string   `json:"id"`
-		Presets []string `json:"presets"`
-	}
-	if err := json.Unmarshal(body, &reply); err != nil {
-		return
-	}
-	if reply.ID != "Listpresets" {
-		return
-	}
+// deliverList hands a completed preset list to every pending waiter and clears
+// them.
+func (c *Client) deliverList(files []proto.PresetFile) {
 	c.mu.Lock()
 	waiters := c.listWaiters
 	c.listWaiters = nil
 	c.mu.Unlock()
 	for _, w := range waiters {
-		w <- reply.Presets // buffered size 1, never blocks
+		w <- files // buffered size 1, never blocks
 	}
 }
 

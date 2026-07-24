@@ -5,21 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/steveclarke/ucmix/internal/proto"
 )
 
-// listTimeout bounds how long ListProjects waits for the board's preset-list
-// reply when the caller's context carries no deadline. A real board may never
-// answer the request (the JM reply the client waits for is unconfirmed against
-// hardware), so an unbounded wait would hang forever. Package-level so tests can
-// shorten it. Never reassigned outside tests.
+// listTimeout bounds how long a preset-list call waits for the board's reply
+// when the caller's context carries no deadline. A genuinely silent board (e.g.
+// a firmware that never answers) would otherwise hang the wait forever.
+// Package-level so tests can shorten it. Never reassigned outside tests.
 var listTimeout = 5 * time.Second
 
-// ErrListTimeout is returned by ListProjects when the board does not answer the
-// preset-list request within the bound. It is distinct from a caller cancel so
-// the CLI can surface the real-hardware gap.
+// ErrListTimeout is returned by ListProjects and ListScenes when the board does
+// not answer the preset-list request within the bound. It is distinct from a
+// caller cancel so the CLI can surface the gap.
 var ErrListTimeout = errors.New("ucmix: timed out waiting for the board's preset list")
 
 // buildPresetFile joins a project and scene into the preset-file path the board
@@ -66,18 +66,68 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// Project names one preset/project returned by ListProjects.
+// Project names one project returned by ListProjects. Name is the board's
+// preset-file name (e.g. "01.Sevenview Live.proj"), the identifier ListScenes
+// takes; Title is the display name shown on the board.
 type Project struct {
-	Name string
+	Name  string
+	Title string
 }
 
-// ListProjects requests the board's preset list (JM Listpresets) and returns
-// the projects it names. The JM reply is routed out of the background merge loop
-// through a buffered waiter, so this blocks until the reply arrives or ctx is
-// done.
+// Scene names one scene returned by ListScenes. Name is the board's preset-file
+// name (e.g. "01.SV Live in Studio.scn"); Title is the display name.
+type Scene struct {
+	Name  string
+	Title string
+}
+
+// ListProjects requests the board's project list (FR Listpresets/proj) and
+// returns the occupied projects. The board reports a fixed roster of 100 slots;
+// only occupied ones are folders (dir:true), so empty slots are dropped.
 func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
-	// Bound the wait when the caller gives no deadline of its own: a real board
-	// can leave the request unanswered, and an unbounded receive would hang.
+	files, err := c.listPresets(ctx, "Listpresets/proj")
+	if err != nil {
+		return nil, err
+	}
+	var projects []Project
+	for _, f := range files {
+		if !f.Dir {
+			continue // empty slot or non-folder entry
+		}
+		projects = append(projects, Project{Name: f.Name, Title: f.Title})
+	}
+	return projects, nil
+}
+
+// ListScenes requests the scene list for a project (FR Listpresets/proj/<name>)
+// and returns the occupied scenes. project is a project Name from ListProjects
+// (e.g. "01.Sevenview Live.proj"). The reply leads with the project's config
+// file and pads to a fixed roster of slots; the config entry and empty slots are
+// dropped, leaving the real scenes.
+func (c *Client) ListScenes(ctx context.Context, project string) ([]Scene, error) {
+	files, err := c.listPresets(ctx, "Listpresets/proj/"+project)
+	if err != nil {
+		return nil, err
+	}
+	var scenes []Scene
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name, ".scn") {
+			continue // the leading .cnfg project-config entry, not a scene
+		}
+		if f.Title == proto.EmptyPresetTitle {
+			continue // unused slot
+		}
+		scenes = append(scenes, Scene{Name: f.Name, Title: f.Title})
+	}
+	return scenes, nil
+}
+
+// listPresets sends an FR request for resource and blocks until the board's FD
+// reply reassembles or the wait is done. The reply is routed out of the
+// background merge loop through a buffered waiter.
+func (c *Client) listPresets(ctx context.Context, resource string) ([]proto.PresetFile, error) {
+	// Bound the wait when the caller gives no deadline of its own: a silent
+	// board would otherwise hang an unbounded receive.
 	bounded := ctx
 	timed := false
 	if _, ok := ctx.Deadline(); !ok {
@@ -87,23 +137,22 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 		timed = true
 	}
 
-	reply := make(chan []string, 1)
+	reply := make(chan []proto.PresetFile, 1)
 	c.mu.Lock()
+	c.nextReqID++
+	id := c.nextReqID
 	c.listWaiters = append(c.listWaiters, reply)
 	c.mu.Unlock()
 
-	if err := c.sendJM(bounded, proto.ListPresetsCmd{URL: "presets/proj"}); err != nil {
+	req := proto.Frame{Code: proto.CodeFR, Payload: proto.MarshalFR(id, resource, "")}
+	if err := c.t.Send(bounded, req); err != nil {
 		c.dropWaiter(reply)
 		return nil, err
 	}
 
 	select {
-	case names := <-reply:
-		projects := make([]Project, len(names))
-		for i, n := range names {
-			projects[i] = Project{Name: n}
-		}
-		return projects, nil
+	case files := <-reply:
+		return files, nil
 	case <-bounded.Done():
 		c.dropWaiter(reply)
 		// A timeout we imposed (caller had no deadline) surfaces as
@@ -116,8 +165,8 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 }
 
 // dropWaiter removes a waiter that is no longer being read (send failed or ctx
-// expired) so handleJMReply never blocks on it.
-func (c *Client) dropWaiter(reply chan []string) {
+// expired) so deliverList never blocks on it.
+func (c *Client) dropWaiter(reply chan []proto.PresetFile) {
 	c.mu.Lock()
 	for i, w := range c.listWaiters {
 		if w == reply {

@@ -187,31 +187,75 @@ func TestStorePresetThenRestore(t *testing.T) {
 	}
 }
 
-func TestListPresets(t *testing.T) {
+func TestListProjectsFR(t *testing.T) {
 	b := New(map[string]any{"k": float32(1)})
 	addr := startBoard(t, b)
 	c := dial(t, addr)
 	c.subscribe(t)
 
-	c.send(t, proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(proto.StorePresetCmd{PresetFile: "scene-x"})})
-	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		_, ok := b.scenes["scene-x"]
-		return ok
-	})
-
-	c.send(t, proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(proto.ListPresetsCmd{URL: "presets"})})
-	f, err := c.readFrame(t, 2*time.Second)
+	// FR Listpresets/proj is answered with FD chunks; reassemble and confirm the
+	// canned projects come back.
+	c.send(t, proto.Frame{Code: proto.CodeFR, Payload: proto.MarshalFR(1, "Listpresets/proj", "")})
+	body := readFDBody(t, c)
+	files, err := proto.ParsePresetList(body)
 	if err != nil {
-		t.Fatalf("no Listpresets reply: %v", err)
+		t.Fatalf("parsing FD reply: %v", err)
 	}
-	if f.Code != proto.CodeJM {
-		t.Fatalf("Listpresets reply code = %q, want JM", f.Code)
+	if len(files) != 3 || files[0].Title != "Main Live" || !files[0].Dir {
+		t.Fatalf("projects reply = %+v", files)
 	}
-	// Body = 4-byte prefix + JSON; just confirm the scene name is present.
-	if !containsBytes(f.Payload, "scene-x") {
-		t.Errorf("Listpresets reply missing scene-x: %s", f.Payload)
+}
+
+func TestListScenesFR(t *testing.T) {
+	b := New(map[string]any{"k": float32(1)})
+	addr := startBoard(t, b)
+	c := dial(t, addr)
+	c.subscribe(t)
+
+	c.send(t, proto.Frame{Code: proto.CodeFR, Payload: proto.MarshalFR(1, "Listpresets/proj/01.Main Live.proj", "")})
+	body := readFDBody(t, c)
+	files, err := proto.ParsePresetList(body)
+	if err != nil {
+		t.Fatalf("parsing FD reply: %v", err)
+	}
+	// Leading .cnfg entry + two scenes + one empty slot.
+	if len(files) != 4 || files[1].Title != "Opening Set" {
+		t.Fatalf("scenes reply = %+v", files)
+	}
+}
+
+func TestListRequestSuppressed(t *testing.T) {
+	b := New(map[string]any{"k": float32(1)})
+	b.SuppressListReply = true
+	addr := startBoard(t, b)
+	c := dial(t, addr)
+	c.subscribe(t)
+
+	c.send(t, proto.Frame{Code: proto.CodeFR, Payload: proto.MarshalFR(1, "Listpresets/proj", "")})
+	if _, err := c.readFrame(t, 200*time.Millisecond); err == nil {
+		t.Fatal("suppressed board sent a reply, want none")
+	}
+}
+
+// readFDBody reads FD frames from c and reassembles them into the full body.
+func readFDBody(t *testing.T, c *testClient) []byte {
+	t.Helper()
+	var asm proto.ChunkAssembler
+	for {
+		f, err := c.readFrame(t, 2*time.Second)
+		if err != nil {
+			t.Fatalf("reading FD reply: %v", err)
+		}
+		if f.Code != proto.CodeFD {
+			continue
+		}
+		chunk, err := proto.ParseFD(f.Payload)
+		if err != nil {
+			t.Fatalf("parsing FD chunk: %v", err)
+		}
+		if body, done := asm.Add(chunk.Chunk); done {
+			return body
+		}
 	}
 }
 
@@ -310,17 +354,4 @@ func waitFor(t *testing.T, cond func() bool) {
 	if !cond() {
 		t.Fatal("condition not met within timeout")
 	}
-}
-
-func containsBytes(hay []byte, needle string) bool {
-	return len(needle) == 0 || indexOf(string(hay), needle) >= 0
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

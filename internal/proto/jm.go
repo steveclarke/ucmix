@@ -109,22 +109,3 @@ func (c RestorePresetCmd) MarshalJSON() ([]byte, error) {
 		PresetFile        string `json:"presetFile"`
 	}{"RestorePreset", "presets", "", 0, c.PresetFile})
 }
-
-// ListPresetsCmd lists presets under a url such as "presets/proj" or
-// "presets/channel".
-//
-// Note: the featherbear library lists via an FD (FileRequest) packet, not JM.
-// The protocol doc records the JM form as {"id":"Listpresets", ...} but the full
-// body was not captured. URL is the modeled variable; adjust once a real
-// Listpresets JM frame is captured from the board.
-type ListPresetsCmd struct {
-	URL string `json:"url"`
-}
-
-// MarshalJSON emits the Listpresets body with the fixed id field.
-func (c ListPresetsCmd) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		ID  string `json:"id"`
-		URL string `json:"url"`
-	}{"Listpresets", c.URL})
-}
