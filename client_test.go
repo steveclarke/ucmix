@@ -71,6 +71,56 @@ func (f *fakeTransport) lastFrame(t *testing.T) proto.Frame {
 	return fs[len(fs)-1]
 }
 
+// commitRecorder captures every commit-barrier hold the client performs, so
+// tests can assert how many times the barrier fired (one per Set/SetMany) and
+// for how long. It replaces the real time-based hold via the commitSleep seam.
+type commitRecorder struct {
+	mu    sync.Mutex
+	holds []time.Duration
+}
+
+func (r *commitRecorder) record(d time.Duration) {
+	r.mu.Lock()
+	r.holds = append(r.holds, d)
+	r.mu.Unlock()
+}
+
+func (r *commitRecorder) reset() {
+	r.mu.Lock()
+	r.holds = nil
+	r.mu.Unlock()
+}
+
+func (r *commitRecorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.holds)
+}
+
+func (r *commitRecorder) last() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.holds) == 0 {
+		return 0
+	}
+	return r.holds[len(r.holds)-1]
+}
+
+// testCommits records commit-barrier holds for the whole package. TestMain wires
+// the commitSleep seam to it so no test ever waits real time for a barrier;
+// barrier tests reset it and assert its contents.
+var testCommits = &commitRecorder{}
+
+// TestMain replaces the commit-barrier hold with an instant recording stub for
+// the whole package (Set/SetMany otherwise hold commitDelay of real time).
+func TestMain(m *testing.M) {
+	commitSleep = func(ctx context.Context, d time.Duration) error {
+		testCommits.record(d)
+		return ctx.Err()
+	}
+	os.Exit(m.Run())
+}
+
 // useFake installs a dialTransport seam returning ft and restores it on cleanup.
 func useFake(t *testing.T, ft *fakeTransport) {
 	t.Helper()
@@ -661,6 +711,98 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 	if err := c.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// connectWithZBOpts connects a client to ft with connect options, delivering
+// seed as the ZB reply. Used to exercise WithCommitDelay.
+func connectWithZBOpts(t *testing.T, ft *fakeTransport, seed map[string]any, opts ...Option) *Client {
+	t.Helper()
+	useFake(t, ft)
+	done := make(chan *Client, 1)
+	go func() {
+		c, err := Connect(context.Background(), "fake", opts...)
+		if err != nil {
+			t.Errorf("Connect: %v", err)
+			done <- nil
+			return
+		}
+		done <- c
+	}()
+	ft.deliver(zbFrame(t, seed))
+	c := <-done
+	if c == nil {
+		t.Fatal("Connect failed")
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+func TestSetHoldsOneCommitBarrier(t *testing.T) {
+	ft := newFakeTransport()
+	c := connectWithZB(t, ft, map[string]any{}) // default commitDelay
+	testCommits.reset()
+
+	if err := c.Set(context.Background(), "line/ch1/mute", true); err != nil {
+		t.Fatal(err)
+	}
+	// A single write commits exactly once, for the default hold.
+	if got := testCommits.count(); got != 1 {
+		t.Fatalf("commit barriers = %d, want 1", got)
+	}
+	if got := testCommits.last(); got != defaultCommitDelay {
+		t.Fatalf("commit hold = %v, want %v", got, defaultCommitDelay)
+	}
+}
+
+func TestSetManyStreamsAllWritesThenOneBarrier(t *testing.T) {
+	ft := newFakeTransport()
+	c := connectWithZB(t, ft, map[string]any{})
+	testCommits.reset()
+
+	settings := []Setting{
+		{Path: "line/ch1/mute", Value: true},
+		{Path: "line/ch2/mute", Value: false},
+		{Path: "line/ch3/username", Value: "Vox"},
+	}
+	if err := c.SetMany(context.Background(), settings); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every write goes out over the one transport, in order (Subscribe is frame
+	// 0), and the whole burst commits exactly once — not once per write.
+	sent := ft.sentFrames()
+	if len(sent) != 1+len(settings) {
+		t.Fatalf("sent %d frames, want %d (Subscribe + %d writes)", len(sent), 1+len(settings), len(settings))
+	}
+	if k, _, err := proto.UnmarshalPV(sent[1].Payload); err != nil || k != "line/ch1/mute" {
+		t.Fatalf("first write = %s (err=%v), want line/ch1/mute", k, err)
+	}
+	if k, _, err := proto.UnmarshalPV(sent[2].Payload); err != nil || k != "line/ch2/mute" {
+		t.Fatalf("second write = %s (err=%v), want line/ch2/mute", k, err)
+	}
+	if k, s, err := proto.UnmarshalPS(sent[3].Payload); err != nil || k != "line/ch3/username" || s != "Vox" {
+		t.Fatalf("third write = %s=%q (err=%v), want line/ch3/username=Vox", k, s, err)
+	}
+	if got := testCommits.count(); got != 1 {
+		t.Fatalf("commit barriers = %d, want 1 for the whole batch", got)
+	}
+}
+
+func TestCommitDelayZeroSkipsBarrier(t *testing.T) {
+	ft := newFakeTransport()
+	c := connectWithZBOpts(t, ft, map[string]any{}, WithCommitDelay(0))
+	testCommits.reset()
+
+	// A commitDelay-0 client (what fade uses) streams writes with no per-write
+	// hold, so a per-step write must never fire the barrier.
+	for i := 0; i < 5; i++ {
+		if err := c.Set(context.Background(), "line/ch1/volume", 0.5); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := testCommits.count(); got != 0 {
+		t.Fatalf("commit barriers = %d, want 0 with commitDelay 0", got)
 	}
 }
 

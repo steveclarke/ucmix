@@ -50,7 +50,8 @@ fx/ch1/plugin/reflection = 0.79         # a reverb knob (raw)
 Everything the mixer can do is one of those paths. Two verbs cover all of it:
 
 - `ucmix get <path>` — read one value
-- `ucmix set <path> <value>` — write one value
+- `ucmix set <path> <value>` — write one value; also `set p1=v1 p2=v2 …` or
+  `set -f <file>` (a `path value` per line) to write many over one connection
 
 Read `reference/paths.md` for the path grammar (groups, channel indexing, and the
 value form for each parameter family). To see the exact live paths on a specific
@@ -82,6 +83,7 @@ Run `ucmix <command> --help` for flags; the CLI evolves, so verify against `--he
 rather than trusting this list to be complete.
 
 - `get <path>` / `set <path> <value>` — read / write one parameter
+- `set p1=v1 p2=v2 …` / `set -f <file>` — write many parameters over one connection
 - `dump [prefix]` — read every path (or those under a prefix); `--as-config` emits YAML
 - `verify <config.yml>` / `apply <config.yml>` — board as code: diff / write a whole config
 - `recall <project> <scene>` / `store <project> <scene>` — mixer scenes
@@ -98,15 +100,19 @@ rather than trusting this list to be complete.
   them; fall back to raw `0..1` wire values for everything else.
 - To copy a setting from one board/state to another, `get <path> --raw` then
   `set <path> <that raw value>` — raw round-trips exactly.
-- Set one parameter per `set`. There is no batch verb; loop `set` for many parameters.
+- Write many parameters in one call — `set p1=v1 p2=v2 …` or `set -f <file>` — rather
+  than looping `set`. A batch reuses one connection and commits once; separate `set`
+  processes reconnect per write and can drop writes under rapid reconnect.
 - `reset` and `apply --reset` are destructive — only with `--yes` and a clear target.
 - Never assume a path exists; confirm with `dump <prefix>` or `get` on a real board.
 
 ## Known limitations
 
-- `ls` / project listing and `apply`'s post-write verify can hang against some real
-  boards (a protocol reply the tool waits for may not arrive). Prefer scripted `set`
-  loops with fresh-`get` verification over `apply` until this is resolved.
+- `ls` / project listing may not work on some real boards: the board may not answer the
+  preset-list request. It now fails with a clear timeout and hint instead of hanging.
+- `apply` writes over one connection with a library commit barrier and verifies on a
+  fresh connection (a fresh `get`), so it no longer depends on the project-list request
+  that can go unanswered. `set -f <file>` is the same batch write path without the verify.
 - HPF (Hz), limiter release curve, and reverb-type enums are not fully calibrated —
   their humanized conversions are approximate. Use raw values when exactness matters.
 - Some UCNET parameters have **no control in UC Surface** (e.g. an FX return's Main/LR

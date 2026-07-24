@@ -46,14 +46,14 @@ type globals struct {
 // dialClient resolves the mixer host (--host > --profile > UCMIX_HOST > current
 // profile > legacy host:) and opens a connection. Connect failures come back as
 // an errs.CLIError with a hint.
-func (g *globals) dialClient(ctx context.Context) (*ucmix.Client, error) {
+func (g *globals) dialClient(ctx context.Context, opts ...ucmix.Option) (*ucmix.Client, error) {
 	addr, err := config.Resolve(g.host, g.profile)
 	if err != nil {
 		return nil, err
 	}
 	dctx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
-	c, err := ucmix.Connect(dctx, addr)
+	c, err := ucmix.Connect(dctx, addr, opts...)
 	if err != nil {
 		return nil, errs.CLIError{
 			Message: fmt.Sprintf("could not connect to mixer at %s: %v", addr, err),

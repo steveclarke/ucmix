@@ -11,6 +11,8 @@ import (
 	"github.com/steveclarke/ucmix/internal/errs"
 	"github.com/steveclarke/ucmix/internal/schema"
 	"github.com/steveclarke/ucmix/internal/ui"
+
+	ucmix "github.com/steveclarke/ucmix"
 )
 
 // offFloorDB is the dB target for `fade <path> off` — the fader taper's bottom
@@ -40,7 +42,10 @@ func newFadeCmd(g *globals) *cobra.Command {
 			path := normalizePath(args[0])
 			ctx := cmd.Context()
 
-			c, err := g.dialClient(ctx)
+			// Fade streams its own paced steps and holds a final settle below, so
+			// the client must not add a per-step commit barrier (that would stall
+			// the ramp by commitDelay on every step).
+			c, err := g.dialClient(ctx, ucmix.WithCommitDelay(0))
 			if err != nil {
 				return err
 			}

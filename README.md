@@ -52,6 +52,8 @@ ucmix get line/ch1/volume              # -6 dB
 ucmix set line/ch1/volume -3dB         # faders speak dB
 ucmix set line/ch1/username "Kick"     # names, icons
 ucmix set line/ch1/48v on              # phantom power
+ucmix set line/ch1/48v=on line/ch1/mute=off   # many writes, one connection
+ucmix set -f strip.txt                 # a `path value` per line, one connection
 ucmix recall "Main Live" "Opening"     # recall a stored scene
 ```
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/steveclarke/ucmix/internal/proto"
 	"github.com/steveclarke/ucmix/internal/schema"
@@ -19,6 +20,19 @@ import (
 // in-memory Transport fake. Never reassigned outside tests.
 var dialTransport = transport.Dial
 
+// commitSleep is the test seam for the commit barrier's hold. Production sleeps
+// for d bounded by ctx; tests swap it for a recorder that returns immediately so
+// the barrier's behavior (how many times it fires, and for how long) is asserted
+// without real waits. Never reassigned outside tests.
+var commitSleep = func(ctx context.Context, d time.Duration) error {
+	select {
+	case <-time.After(d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // ErrConnectionClosed is returned when the transport closes before the ZB
 // snapshot arrives during Connect.
 var ErrConnectionClosed = errors.New("ucmix: connection closed before snapshot")
@@ -29,6 +43,8 @@ var ErrConnectionClosed = errors.New("ucmix: connection closed before snapshot")
 type Client struct {
 	t    transport.Transport
 	tree *state.Tree
+
+	commitDelay time.Duration // post-write hold applied by Set/SetMany; 0 = no barrier
 
 	ckAsm proto.ChunkAssembler // reassembles a CK-chunked snapshot; used only from the read goroutine
 
@@ -62,7 +78,7 @@ func Connect(ctx context.Context, addr string, opts ...Option) (*Client, error) 
 		return nil, err
 	}
 
-	c := &Client{t: t, tree: state.NewTree()}
+	c := &Client{t: t, tree: state.NewTree(), commitDelay: cfg.commitDelay}
 
 	sub := proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(cfg.subscribeCmd())}
 	if err := t.Send(waitCtx, sub); err != nil {
@@ -255,15 +271,62 @@ func (c *Client) Snapshot() map[string]any {
 	return c.tree.Snapshot()
 }
 
-// Set writes v to path. It consults the schema to pick the wire message and
-// encoding: KindBool → PV 1/0, KindFloat → PV via the taper (ToWire), KindString
-// → PS, KindChars → PC. Unknown keys fall back to a best-guess encode from v's
-// Go type (bool/string/float/[]byte).
+// Setting is one path/value write for SetMany. Order is preserved so callers
+// that depend on write order (a compiled board config) keep it.
+type Setting struct {
+	Path  string
+	Value any
+}
+
+// Set writes v to path and holds a commit barrier before returning, so a caller
+// that closes right after gets a committed write (the board's per-connection
+// reader consumes the frame before the connection drops). The barrier duration
+// is the Client's commitDelay; a Client built WithCommitDelay(0) writes without
+// holding.
+//
+// Set consults the schema to pick the wire message and encoding: KindBool → PV
+// 1/0, KindFloat → PV via the taper (ToWire), KindString → PS, KindChars → PC.
+// Unknown keys fall back to a best-guess encode from v's Go type
+// (bool/string/float/[]byte).
 //
 // Float writes send the 0..1 wire position only; ReadScale is a read-side
 // inflation and is never applied on write (the board wants 0..1 — a raw 74.6
 // pins the fader to the top). SetFaderDB(-6) therefore sends 0.746, not 74.6.
 func (c *Client) Set(ctx context.Context, path string, v any) error {
+	if err := c.writeValue(ctx, path, v); err != nil {
+		return err
+	}
+	return c.commit(ctx)
+}
+
+// SetMany writes every setting over this one held-open connection in order, then
+// holds a single commit barrier — one connection and one barrier for the whole
+// burst, instead of a connect-and-commit per write. This is the reliable path
+// for configuring many values at once (a channel strip, a DCA's membership, a
+// whole board): rapid connect-per-write reconnects drop writes silently.
+func (c *Client) SetMany(ctx context.Context, settings []Setting) error {
+	for _, s := range settings {
+		if err := c.writeValue(ctx, s.Path, s.Value); err != nil {
+			return err
+		}
+	}
+	return c.commit(ctx)
+}
+
+// commit holds the connection open for commitDelay so the board consumes the
+// preceding writes before the caller closes. A zero commitDelay is a no-op (the
+// caller commits itself). The hold is bounded by ctx.
+func (c *Client) commit(ctx context.Context) error {
+	if c.commitDelay <= 0 {
+		return nil
+	}
+	return commitSleep(ctx, c.commitDelay)
+}
+
+// writeValue encodes v for path and sends it, with no commit barrier. It is the
+// shared write primitive under Set (single write + barrier) and SetMany (many
+// writes + one barrier).
+func (c *Client) writeValue(ctx context.Context, path string, v any) error {
 	spec, known := schema.Lookup(path)
 	if !known {
 		return c.setUnknown(ctx, path, v)

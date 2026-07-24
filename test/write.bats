@@ -72,3 +72,50 @@ load test_helper
   [[ "$output" == *"invalid value"* ]]
   [[ "$output" == *"set --help"* ]]
 }
+
+@test "set several key=value pairs writes them all over one connection" {
+  run "${UCMIX_BIN}" set line.ch1.mute=on line.ch2.mute=on line.ch3.username=Vox
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"set 3 values"* ]]
+
+  run "${UCMIX_BIN}" get line.ch1.mute
+  [[ "$output" == *"true"* ]]
+  run "${UCMIX_BIN}" get line.ch2.mute
+  [[ "$output" == *"true"* ]]
+  run "${UCMIX_BIN}" get line.ch3.username
+  [[ "$output" == *"Vox"* ]]
+}
+
+@test "set -f writes every path value line in a file" {
+  cat >writes.txt <<'EOF'
+# a channel strip
+line.ch1.mute on
+line.ch1.volume -6dB
+
+line.ch1.username Kick Drum
+EOF
+  run "${UCMIX_BIN}" set -f writes.txt
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"set 3 values"* ]]
+
+  run "${UCMIX_BIN}" get line.ch1.username
+  [[ "$output" == *"Kick Drum"* ]]
+  run "${UCMIX_BIN}" get line.ch1.volume --raw
+  [[ "$output" == *"0.74"* ]]
+}
+
+@test "set --json for a batch emits a settings array" {
+  run "${UCMIX_BIN}" set --json line.ch1.mute=on line.ch2.mute=off
+  [ "$status" -eq 0 ]
+  echo "$output" | json_valid
+  [[ "$output" == *"\"written\""* ]]
+  [[ "$output" == *"line/ch1/mute"* ]]
+  [[ "$output" == *"line/ch2/mute"* ]]
+}
+
+@test "set -f with an unparseable line fails with a hint" {
+  printf 'line.ch1.mute\n' >bad.txt
+  run "${UCMIX_BIN}" set -f bad.txt
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"path value"* ]]
+}
