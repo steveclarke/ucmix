@@ -1,13 +1,29 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveclarke/ucmix/internal/errs"
 	"github.com/steveclarke/ucmix/internal/ui"
+
+	ucmix "github.com/steveclarke/ucmix"
 )
+
+// listErr wraps a ListProjects failure as a CLIError, giving a real-hardware
+// hint when the board never answered the preset-list request (rather than
+// hanging, ListProjects now fails cleanly).
+func listErr(what string, err error) error {
+	if errors.Is(err, ucmix.ErrListTimeout) {
+		return errs.CLIError{
+			Message: fmt.Sprintf("%s: the mixer did not answer the preset-list request", what),
+			Hint:    "some firmware does not reply to this request; listing may be unsupported on this board",
+		}
+	}
+	return errs.CLIError{Message: fmt.Sprintf("%s: %v", what, err)}
+}
 
 // newLsCmd builds `ls` with `projects` and `scenes` subcommands: list presets
 // the mixer exposes.
@@ -36,7 +52,7 @@ func newLsProjectsCmd(g *globals) *cobra.Command {
 
 			projects, err := c.ListProjects(cmd.Context())
 			if err != nil {
-				return errs.CLIError{Message: fmt.Sprintf("listing projects failed: %v", err)}
+				return listErr("listing projects failed", err)
 			}
 			names := make([]string, len(projects))
 			for i, p := range projects {
@@ -72,7 +88,7 @@ func newLsScenesCmd(g *globals) *cobra.Command {
 
 			projects, err := c.ListProjects(cmd.Context())
 			if err != nil {
-				return errs.CLIError{Message: fmt.Sprintf("listing presets failed: %v", err)}
+				return listErr("listing presets failed", err)
 			}
 			names := make([]string, len(projects))
 			for i, p := range projects {

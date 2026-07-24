@@ -66,15 +66,12 @@ func newApplyCmd(g *globals) *cobra.Command {
 					return &exitError{code: 2, err: errs.CLIError{Message: fmt.Sprintf("reset failed: %v", err)}}
 				}
 			}
+			// writeDesired streams every setting over connection A and holds one
+			// commit barrier (SetMany) so the board consumes the burst before A
+			// closes. The barrier lives in the library, not a round-trip here — a
+			// ListProjects barrier hangs on real hardware (the board may not
+			// answer the preset-list request).
 			written, werr := writeDesired(ctx, ca, desired, g)
-			if werr == nil {
-				// Write barrier: a round-trip on A forces the board's sequential
-				// per-connection reader to consume every write frame before we
-				// close A. Without it, closing A races delivery of the last
-				// frames and the tail of the burst is silently lost (surfaced as
-				// absent keys on slow CI runners).
-				_, _ = ca.ListProjects(ctx)
-			}
 			_ = ca.Close()
 			if werr != nil {
 				return &exitError{code: 2, err: errs.CLIError{
@@ -150,25 +147,28 @@ func confirmReset(yes bool) (proceed bool, err error) {
 	return ok, nil
 }
 
-// writeDesired writes each desired setting through client.Set in compiled order.
-// It returns the number of settings written and the first write error.
+// writeDesired writes every desired setting through client.SetMany in compiled
+// order: one held connection, one commit barrier for the whole burst. It returns
+// the number of settings written and the first error.
 //
-// The value written is the HUMAN value, sent through client.Set, which applies
-// the key's taper (human -> 0..1) and never a read-scale. So a -6 dB fader is
-// written as Set(path, -6.0) -> wire 0.746. See applyValueFor for the few keys
-// whose wire form must be written verbatim (color, enum floats).
+// The value written is the HUMAN value, which SetMany hands to the key's taper
+// (human -> 0..1) and never a read-scale. So a -6 dB fader is written as
+// (path, -6.0) -> wire 0.746. See applyValueFor for the few keys whose wire form
+// must be written verbatim (color, enum floats).
 func writeDesired(ctx context.Context, c *ucmix.Client, desired []boardconfig.Desired, g *globals) (int, error) {
 	if !g.json {
 		fmt.Println(ui.Header(fmt.Sprintf("applying %d settings…", len(desired))))
 	}
-	for _, d := range desired {
+	settings := make([]ucmix.Setting, len(desired))
+	for i, d := range desired {
 		v, err := applyValueFor(d)
 		if err != nil {
 			return 0, err
 		}
-		if err := c.Set(ctx, d.Path, v); err != nil {
-			return 0, err
-		}
+		settings[i] = ucmix.Setting{Path: d.Path, Value: v}
+	}
+	if err := c.SetMany(ctx, settings); err != nil {
+		return 0, err
 	}
 	return len(desired), nil
 }

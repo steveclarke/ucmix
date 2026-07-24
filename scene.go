@@ -2,11 +2,25 @@ package ucmix
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/steveclarke/ucmix/internal/proto"
 )
+
+// listTimeout bounds how long ListProjects waits for the board's preset-list
+// reply when the caller's context carries no deadline. A real board may never
+// answer the request (the JM reply the client waits for is unconfirmed against
+// hardware), so an unbounded wait would hang forever. Package-level so tests can
+// shorten it. Never reassigned outside tests.
+var listTimeout = 5 * time.Second
+
+// ErrListTimeout is returned by ListProjects when the board does not answer the
+// preset-list request within the bound. It is distinct from a caller cancel so
+// the CLI can surface the real-hardware gap.
+var ErrListTimeout = errors.New("ucmix: timed out waiting for the board's preset list")
 
 // buildPresetFile joins a project and scene into the preset-file path the board
 // keys scenes by. RecallScene and StoreScene must agree on this format so a
@@ -62,12 +76,23 @@ type Project struct {
 // through a buffered waiter, so this blocks until the reply arrives or ctx is
 // done.
 func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
+	// Bound the wait when the caller gives no deadline of its own: a real board
+	// can leave the request unanswered, and an unbounded receive would hang.
+	bounded := ctx
+	timed := false
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		bounded, cancel = context.WithTimeout(ctx, listTimeout)
+		defer cancel()
+		timed = true
+	}
+
 	reply := make(chan []string, 1)
 	c.mu.Lock()
 	c.listWaiters = append(c.listWaiters, reply)
 	c.mu.Unlock()
 
-	if err := c.sendJM(ctx, proto.ListPresetsCmd{URL: "presets/proj"}); err != nil {
+	if err := c.sendJM(bounded, proto.ListPresetsCmd{URL: "presets/proj"}); err != nil {
 		c.dropWaiter(reply)
 		return nil, err
 	}
@@ -79,9 +104,14 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 			projects[i] = Project{Name: n}
 		}
 		return projects, nil
-	case <-ctx.Done():
+	case <-bounded.Done():
 		c.dropWaiter(reply)
-		return nil, ctx.Err()
+		// A timeout we imposed (caller had no deadline) surfaces as
+		// ErrListTimeout; a caller-driven cancel/deadline passes through.
+		if timed && ctx.Err() == nil {
+			return nil, ErrListTimeout
+		}
+		return nil, bounded.Err()
 	}
 }
 

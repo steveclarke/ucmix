@@ -2,6 +2,8 @@ package ucmix
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -153,5 +155,59 @@ func TestIntegrationPacedBulkWritesUnderDropFault(t *testing.T) {
 		if !isF || (f != 0 && f != 1) {
 			t.Errorf("board pan = %v, want a clean 0 or 1", v)
 		}
+	}
+}
+
+// TestIntegrationSetManyReusesOneConnection is the #19 reliability guarantee: a
+// batch of many writes goes over a single held connection and every write lands.
+// A regression to connect-per-write would push AcceptedConns past 1 (and, on
+// rapid reconnect, drop writes).
+func TestIntegrationSetManyReusesOneConnection(t *testing.T) {
+	b := fakeboard.New(map[string]any{})
+	addr := startFakeboard(t, b)
+	c := connectReal(t, addr)
+
+	const n = 12
+	settings := make([]Setting, n)
+	for i := range settings {
+		settings[i] = Setting{Path: fmt.Sprintf("line/ch%d/mute", i+1), Value: true}
+	}
+	if err := c.SetMany(context.Background(), settings); err != nil {
+		t.Fatalf("SetMany: %v", err)
+	}
+
+	// Wait for the last write to land, then assert every path is present.
+	waitFor(t, func() bool { _, ok := b.Snapshot()[fmt.Sprintf("line/ch%d/mute", n)]; return ok })
+	snap := b.Snapshot()
+	for _, s := range settings {
+		if _, ok := snap[s.Path]; !ok {
+			t.Errorf("write dropped: %s missing from board", s.Path)
+		}
+	}
+	if got := b.AcceptedConns(); got != 1 {
+		t.Fatalf("board accepted %d connections for the batch, want 1", got)
+	}
+}
+
+// TestIntegrationListProjectsTimesOutWhenBoardSilent is the #9 guard: a real
+// board may never answer a preset-list request. ListProjects must fail with
+// ErrListTimeout within the bound instead of hanging forever.
+func TestIntegrationListProjectsTimesOutWhenBoardSilent(t *testing.T) {
+	b := fakeboard.New(map[string]any{})
+	b.SuppressListReply = true // never answers Listpresets, like a real board
+	addr := startFakeboard(t, b)
+	c := connectReal(t, addr)
+
+	orig := listTimeout
+	listTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { listTimeout = orig })
+
+	start := time.Now()
+	_, err := c.ListProjects(context.Background())
+	if !errors.Is(err, ErrListTimeout) {
+		t.Fatalf("ListProjects err = %v, want ErrListTimeout", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("ListProjects took %v, want ~%v (should not hang)", elapsed, listTimeout)
 	}
 }

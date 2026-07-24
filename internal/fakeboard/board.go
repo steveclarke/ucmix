@@ -32,11 +32,16 @@ type Board struct {
 	// StaleAfter, when > 0, stops delivering live delta frames to a connection
 	// once that many deltas have been SENT to it (stale-subscription).
 	StaleAfter int
+	// SuppressListReply, when true, silently drops the Listpresets request and
+	// sends no reply — reproducing a real board that never answers a preset-list
+	// request, which would hang an unbounded ListProjects wait.
+	SuppressListReply bool
 
-	mu     sync.Mutex // guards tree access grouping, scenes, conns, subscribed
-	tree   *state.Tree
-	scenes map[string]map[string]any
-	conns  map[*conn]struct{}
+	mu       sync.Mutex // guards tree access grouping, scenes, conns, subscribed, accepted
+	tree     *state.Tree
+	scenes   map[string]map[string]any
+	conns    map[*conn]struct{}
+	accepted int // cumulative count of accepted connections (test assertion)
 
 	ln        net.Listener
 	done      chan struct{}
@@ -118,6 +123,14 @@ func (b *Board) Close() error {
 // Snapshot returns a deep copy of the board's current tree (test helper).
 func (b *Board) Snapshot() map[string]any { return b.tree.Snapshot() }
 
+// AcceptedConns returns how many connections the board has accepted since Start.
+// A batch write that reuses one held connection leaves this at 1 (test helper).
+func (b *Board) AcceptedConns() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.accepted
+}
+
 func (b *Board) acceptLoop() {
 	defer b.wg.Done()
 	for {
@@ -128,6 +141,7 @@ func (b *Board) acceptLoop() {
 		c := &conn{nc: nc}
 		b.mu.Lock()
 		b.conns[c] = struct{}{}
+		b.accepted++
 		b.mu.Unlock()
 		b.wg.Add(1)
 		go b.serve(c)
@@ -245,6 +259,9 @@ func (b *Board) handleJM(c *conn, f proto.Frame) {
 		_ = json.Unmarshal(body, &cmd)
 		b.storePreset(cmd.PresetFile)
 	case "Listpresets":
+		if b.SuppressListReply {
+			return // real-board behavior: no reply, so an unbounded wait hangs
+		}
 		b.listPresets(c)
 	}
 }
