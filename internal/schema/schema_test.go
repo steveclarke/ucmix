@@ -45,12 +45,22 @@ var rows = []row{
 	{"line/comp/attack", "line/ch1/comp/attack", KindFloat, false, "", 1},
 	{"line/comp/release", "line/ch1/comp/release", KindFloat, false, "", 1},
 	{"line/comp/gain", "line/ch1/comp/gain", KindFloat, false, "", 1},
+	{"line/gate/on", "line/ch1/gate/on", KindBool, false, "", 1},
+	{"line/limiteron", "line/ch1/limit/limiteron", KindBool, false, "", 1},
+	{"line/limit/threshold", "line/ch1/limit/threshold", KindFloat, true, "dB", 1},
+	{"line/limit/release", "line/ch1/limit/release", KindFloat, true, "ms", 1},
 
 	// aux/chN — monitor mix master
 	{"aux/volume", "aux/ch1/volume", KindFloat, true, "dB", 1},
 	{"aux/username", "aux/ch1/username", KindString, false, "", 1},
 	{"aux/link", "aux/ch1/link", KindBool, false, "", 1},
 	{"aux/linkmaster", "aux/ch1/linkmaster", KindBool, false, "", 1},
+	{"aux/panlinkstate", "aux/ch1/panlinkstate", KindBool, false, "", 1},
+	{"aux/mute", "aux/ch1/mute", KindBool, false, "", 1},
+	{"aux/solo", "aux/ch1/solo", KindBool, false, "", 1},
+	{"aux/comp/on", "aux/ch1/comp/on", KindBool, false, "", 1},
+	{"aux/send", "aux/ch1/aux2", KindFloat, true, "dB", 1},
+	{"aux/adc_src", "aux/ch1/adc_src", KindFloat, true, "input", 1},
 	{"aux/auxpremode", "aux/ch1/auxpremode", KindFloat, false, "", 1},
 	{"aux/limiteron", "aux/ch1/limit/limiteron", KindBool, false, "", 1},
 	{"aux/threshold", "aux/ch1/limit/threshold", KindFloat, true, "dB", 1},
@@ -61,8 +71,59 @@ var rows = []row{
 
 	// fxreturn/chN — FX return
 	{"fxreturn/username", "fxreturn/ch1/username", KindString, false, "", 1},
+	{"fxreturn/volume", "fxreturn/ch1/volume", KindFloat, true, "dB", 1},
 	{"fxreturn/aux", "fxreturn/ch1/aux2", KindFloat, true, "dB", 1},
+	{"fxreturn/FX", "fxreturn/ch1/FXA", KindFloat, true, "dB", 1},
+	{"fxreturn/adc_src", "fxreturn/ch1/adc_src", KindFloat, true, "input", 1},
 	{"fxreturn/mute", "fxreturn/ch1/mute", KindBool, false, "", 1},
+	{"fxreturn/solo", "fxreturn/ch1/solo", KindBool, false, "", 1},
+	{"fxreturn/link", "fxreturn/ch1/link", KindBool, false, "", 1},
+	{"fxreturn/lr", "fxreturn/ch1/lr", KindBool, false, "", 1},
+
+	// sub/chN — subgroup master
+	{"sub/volume", "sub/ch1/volume", KindFloat, true, "dB", 1},
+	{"sub/send", "sub/ch1/aux2", KindFloat, true, "dB", 1},
+	{"sub/adc_src", "sub/ch1/adc_src", KindFloat, true, "input", 1},
+	{"sub/mute", "sub/ch1/mute", KindBool, false, "", 1},
+	{"sub/limit/threshold", "sub/ch1/limit/threshold", KindFloat, true, "dB", 1},
+	{"sub/limit/release", "sub/ch1/limit/release", KindFloat, true, "ms", 1},
+
+	// main/chN — main bus master
+	{"main/volume", "main/ch1/volume", KindFloat, true, "dB", 1},
+	{"main/send", "main/ch1/aux2", KindFloat, true, "dB", 1},
+	{"main/mute", "main/ch1/mute", KindBool, false, "", 1},
+	{"main/limit/threshold", "main/ch1/limit/threshold", KindFloat, true, "dB", 1},
+
+	// return/chN — tape/aux return
+	{"return/volume", "return/ch1/volume", KindFloat, true, "dB", 1},
+	{"return/send", "return/ch1/aux2", KindFloat, true, "dB", 1},
+	{"return/FX", "return/ch1/FXB", KindFloat, true, "dB", 1},
+	{"return/mute", "return/ch1/mute", KindBool, false, "", 1},
+
+	// fxbus/chN — FX bus master
+	{"fxbus/volume", "fxbus/ch1/volume", KindFloat, true, "dB", 1},
+	{"fxbus/mute", "fxbus/ch1/mute", KindBool, false, "", 1},
+
+	// filtergroup/chN — DCA master
+	{"filtergroup/volume", "filtergroup/ch1/volume", KindFloat, true, "dB", 1},
+	{"filtergroup/aux", "filtergroup/ch1/aux2", KindFloat, true, "dB", 1},
+	{"filtergroup/fx", "filtergroup/ch1/fx2", KindFloat, true, "dB", 1},
+	{"filtergroup/mute", "filtergroup/ch1/mute", KindBool, false, "", 1},
+	{"filtergroup/solo", "filtergroup/ch1/solo", KindBool, false, "", 1},
+
+	// autofiltergroup/chN — automatic DCA master
+	{"autofiltergroup/volume", "autofiltergroup/ch1/volume", KindFloat, true, "dB", 1},
+	{"autofiltergroup/fx", "autofiltergroup/ch1/fx2", KindFloat, true, "dB", 1},
+	{"autofiltergroup/mute", "autofiltergroup/ch1/mute", KindBool, false, "", 1},
+
+	// talkback/chN — talkback channel
+	{"talkback/volume", "talkback/ch1/volume", KindFloat, true, "dB", 1},
+	{"talkback/send", "talkback/ch1/aux2", KindFloat, true, "dB", 1},
+	{"talkback/adc_src", "talkback/ch1/adc_src", KindFloat, true, "input", 1},
+	{"talkback/polarity", "talkback/ch1/polarity", KindBool, false, "", 1},
+
+	// geq/chN — graphic EQ enable
+	{"geq/on", "geq/ch1/on", KindBool, false, "", 1},
 }
 
 func TestLookupSeededKeys(t *testing.T) {
@@ -76,7 +137,7 @@ func TestLookupSeededKeys(t *testing.T) {
 				t.Errorf("Kind = %v, want %v", spec.Kind, r.wantKind)
 			}
 			if !spec.Writable {
-				t.Errorf("Writable = false; every seeded key is a verified write")
+				t.Errorf("Writable = false; every table key is a writable control")
 			}
 			if spec.ReadScale != r.wantScale {
 				t.Errorf("ReadScale = %v, want %v", spec.ReadScale, r.wantScale)
@@ -109,6 +170,39 @@ func TestVolumeReadScaleIsPlainWire(t *testing.T) {
 		if spec.ReadScale != 1 {
 			t.Errorf("Lookup(%q).ReadScale = %v, want 1", path, spec.ReadScale)
 		}
+	}
+}
+
+// TestExtendedBusRawFamiliesStayRaw locks the families deliberately left as raw
+// pass-through on the extended buses: DCA membership matrices, state mirrors,
+// the limiter reduction meter, and the alternate-source slot list. Humanizing
+// these would either invent a unit (membership is routing, not a level) or
+// corrupt a read-only value.
+func TestExtendedBusRawFamiliesStayRaw(t *testing.T) {
+	for _, path := range []string{
+		"filtergroup/ch1/line5",     // DCA membership toggle (routing matrix)
+		"filtergroup/ch1/mute_aux2", // per-member mute-in-aux flag
+		"filtergroup/ch1/return3",   // DCA membership of a return
+		"fxreturn/ch1/states/link",  // read-only state mirror
+		"sub/ch1/limit/reduction",   // gain-reduction meter, not a setpoint
+		"aux/ch1/adc_src2",          // alternate-source slot list stays raw
+	} {
+		if _, ok := Lookup(path); ok {
+			t.Errorf("Lookup(%q) = _, true; want raw pass-through (false)", path)
+		}
+	}
+}
+
+// TestExtendedBusDCAMasterIsFader is the regression guard for the shipped gap:
+// the DCA master fader (filtergroup/chN/volume) returned the raw wire value
+// instead of dB. It must resolve to the dB Fader taper like line/aux volume.
+func TestExtendedBusDCAMasterIsFader(t *testing.T) {
+	spec, ok := Lookup("filtergroup/ch3/volume")
+	if !ok {
+		t.Fatal("Lookup(filtergroup/ch3/volume) = _, false; want a match")
+	}
+	if spec.Taper == nil || spec.Taper.Unit() != "dB" {
+		t.Fatalf("filtergroup volume taper = %v, want a dB taper", spec.Taper)
 	}
 }
 

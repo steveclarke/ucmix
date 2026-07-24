@@ -340,6 +340,109 @@ func TestGetHumanizesVolume(t *testing.T) {
 	}
 }
 
+// TestGetHumanizesDCAMasterVolume is the regression guard for the shipped gap:
+// the DCA master fader (filtergroup/chN/volume) read back the raw wire value
+// (~0.746) instead of dB. Through Client.Get it must humanize to -6 dB, exactly
+// like line/aux volume — the wire-level snapshot test never exercised the taper.
+func TestGetHumanizesDCAMasterVolume(t *testing.T) {
+	ft := newFakeTransport()
+	c := connectWithZB(t, ft, map[string]any{"filtergroup/ch1/volume": float32(0.746)})
+	v, ok := c.Get("filtergroup/ch1/volume")
+	if !ok {
+		t.Fatal("filtergroup volume missing")
+	}
+	if math.Abs(v.(float64)-(-6)) > 0.2 {
+		t.Fatalf("Get(filtergroup/ch1/volume) = %v dB, want ~-6", v)
+	}
+	// Raw stays as stored.
+	rv, _ := c.GetRaw("filtergroup/ch1/volume")
+	rf, _ := toFloat64(rv)
+	if math.Abs(rf-0.746) > 1e-3 {
+		t.Fatalf("GetRaw(filtergroup/ch1/volume) = %v, want 0.746", rv)
+	}
+}
+
+// TestExtendedBusFamiliesHumanize walks one representative of each newly
+// humanized family through Get and asserts the human unit, not the raw wire
+// value, comes back. Wire anchors: 0.746 = -6 dB (fader/send), 0.03125 = input 1
+// (adc_src), 1.0 = true (toggle), 0.5 = 400 ms (limiter release).
+func TestExtendedBusFamiliesHumanize(t *testing.T) {
+	ft := newFakeTransport()
+	c := connectWithZB(t, ft, map[string]any{
+		"sub/ch1/volume":             float32(0.746),
+		"main/ch2/volume":            float32(0.746),
+		"talkback/ch1/aux3":          float32(0.746),
+		"filtergroup/ch1/fx2":        float32(0.746),
+		"aux/ch1/adc_src":            float32(0.03125),
+		"sub/ch1/mute":               float32(1),
+		"geq/ch1/on":                 float32(1),
+		"main/ch1/limit/release":     float32(0.5),
+		"return/ch1/limit/threshold": float32(1),
+	})
+	cases := []struct {
+		path string
+		want float64
+		tol  float64
+	}{
+		{"sub/ch1/volume", -6, 0.2},
+		{"main/ch2/volume", -6, 0.2},
+		{"talkback/ch1/aux3", -6, 0.2},
+		{"filtergroup/ch1/fx2", -6, 0.2},
+		{"aux/ch1/adc_src", 1, 1e-6},           // input number
+		{"main/ch1/limit/release", 400, 1},     // ms
+		{"return/ch1/limit/threshold", 0, 0.1}, // dB (1.0 = 0 dB)
+	}
+	for _, tc := range cases {
+		v, ok := c.Get(tc.path)
+		if !ok {
+			t.Errorf("Get(%q) missing", tc.path)
+			continue
+		}
+		f, isFloat := v.(float64)
+		if !isFloat {
+			t.Errorf("Get(%q) = %T, want humanized float64", tc.path, v)
+			continue
+		}
+		if math.Abs(f-tc.want) > tc.tol {
+			t.Errorf("Get(%q) = %v, want ~%v", tc.path, f, tc.want)
+		}
+	}
+	// Toggles humanize to bool, not a raw float.
+	for _, path := range []string{"sub/ch1/mute", "geq/ch1/on"} {
+		v, ok := c.Get(path)
+		if !ok {
+			t.Errorf("Get(%q) missing", path)
+			continue
+		}
+		if b, isBool := v.(bool); !isBool || !b {
+			t.Errorf("Get(%q) = %v (%T), want true", path, v, v)
+		}
+	}
+}
+
+// TestSetDCAMasterVolumeRoundTrips confirms the write path for the extended
+// buses: a dB fader write tapers to the wire, and reading the stored wire value
+// back humanizes to the same dB. Mirrors the line/aux fader round-trip.
+func TestSetDCAMasterVolumeRoundTrips(t *testing.T) {
+	ft := newFakeTransport()
+	c := connectWithZB(t, ft, map[string]any{})
+	ctx := context.Background()
+
+	if err := c.Set(ctx, "filtergroup/ch1/volume", -6.0); err != nil {
+		t.Fatal(err)
+	}
+	key, val := decodePV(t, c, ft)
+	if key != "filtergroup/ch1/volume" || math.Abs(float64(val)-0.746) > 1e-3 {
+		t.Fatalf("Set(filtergroup/ch1/volume, -6) -> %s=%v, want filtergroup/ch1/volume=~0.746", key, val)
+	}
+	// Feed the wire value back as board state and read it as dB.
+	c2 := connectWithZB(t, newFakeTransport(), map[string]any{"filtergroup/ch1/volume": val})
+	v, ok := c2.Get("filtergroup/ch1/volume")
+	if !ok || math.Abs(v.(float64)-(-6)) > 0.2 {
+		t.Fatalf("round-trip Get = %v (ok=%v), want ~-6 dB", v, ok)
+	}
+}
+
 func TestGetHumanizesColorFromSnapshot(t *testing.T) {
 	ft := newFakeTransport()
 	// A ZB stores color ABGR-packed into an integer: the little-endian read of the
