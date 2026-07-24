@@ -62,6 +62,34 @@ plain text. Values use human units: `-6dB`, `100Hz`, `on`/`off`, a physical
 input number for `adc_src`, a hex string for `color`. Paths use slashes
 (`line/ch1/volume`) or dots (`line.ch1.volume`).
 
+## Noun commands (channel / mix / send)
+
+For the common actions there are noun-grouped shortcuts — a thin veneer over
+`set` that needs no path knowledge. Each verb builds one path and writes one
+value; anything not covered stays `ucmix set <path> <value>`.
+
+```sh
+ucmix channel 3 name "Drums"           # line/ch3/username
+ucmix channel 3 patch 5                # line/ch3/adc_src   (physical input)
+ucmix channel 3 phantom on             # line/ch3/48v
+ucmix channel 3 fader -6dB             # line/ch3/volume
+ucmix channel 3 mute on                # line/ch3/mute
+ucmix channel 3 color blue             # line/ch3/color     (name or hex)
+ucmix channel 3 icon drums             # line/ch3/iconid    (name or id)
+ucmix channel 3 hpf 100Hz              # line/ch3/filter/hpf
+
+ucmix mix 1 name "Steve"               # aux/ch1/username
+ucmix mix Steve fader -6dB             # a mix answers to its name or its number
+ucmix mix 1 stereo on                  # aux/ch1/link
+ucmix mix 1 limiter on --threshold -6 --release 400
+
+ucmix send 3 1 -6dB                    # channel 3 into mix 1: line/ch3/aux1
+```
+
+Run `ucmix channel --help` or `ucmix mix --help` for the full verb list. Color
+names (`blue`, `red`, `green`, …) and icon names (`drums`, `bass`, `vocal`)
+resolve to wire values; a hex color or a raw icon id still works.
+
 ## Connecting to a mixer
 
 ucmix resolves which mixer to talk to in this order: the `--host` flag, a named

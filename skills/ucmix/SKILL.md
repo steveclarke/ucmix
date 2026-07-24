@@ -84,6 +84,10 @@ rather than trusting this list to be complete.
 
 - `get <path>` / `set <path> <value>` — read / write one parameter
 - `set p1=v1 p2=v2 …` / `set -f <file>` — write many parameters over one connection
+- `channel <n> <verb> <value>` / `mix <name|n> <verb> <value>` / `send <ch> <mix> <dB>` —
+  human shortcuts over `set` for the common channel-strip, monitor-mix, and send
+  actions (a thin veneer; the raw `set` path model still covers everything). Built
+  for humans at a keyboard — an agent should keep using raw `get`/`set` below.
 - `dump [prefix]` — read every path (or those under a prefix); `--as-config` emits YAML
 - `verify <config.yml>` / `apply <config.yml>` — board as code: diff / write a whole config
 - `recall <project> <scene>` / `store <project> <scene>` — mixer scenes
