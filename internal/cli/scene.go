@@ -214,6 +214,77 @@ func newRenameCmd(g *globals) *cobra.Command {
 	}
 }
 
+// newDeleteCmd builds `delete <project> <scene>`: remove a stored scene, freeing
+// its slot. DESTRUCTIVE — it requires --yes or an interactive confirmation, and
+// refuses in a non-tty without --yes.
+func newDeleteCmd(g *globals) *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:     "delete <project> <scene>",
+		Short:   "Delete a stored scene (destructive)",
+		Example: `  ucmix delete "135 Main Live" "Soundcheck" --yes`,
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			projectArg, sceneArg := args[0], args[1]
+			c, err := g.dialClient(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = c.Close() }()
+
+			project, scene, err := resolveScene(ctx, c, projectArg, sceneArg, "delete")
+			if err != nil {
+				return err
+			}
+
+			// Confirm against the RESOLVED scene, so the prompt names exactly what
+			// is about to be removed rather than what was typed.
+			if !yes {
+				if !term.IsTerminal(os.Stdin.Fd()) {
+					return errs.CLIError{
+						Message: "delete is destructive and was not confirmed",
+						Hint:    "re-run with --yes (no interactive terminal to prompt on)",
+					}
+				}
+				ok := false
+				confirm := huh.NewConfirm().
+					Title(fmt.Sprintf("Delete %q (slot %s) from %s? This cannot be undone.",
+						scene.Title, scene.Name, project.Title)).
+					Value(&ok)
+				if err := confirm.Run(); err != nil {
+					return errs.CLIError{Message: fmt.Sprintf("confirmation failed: %v", err)}
+				}
+				if !ok {
+					fmt.Println(ui.Hint("delete canceled"))
+					return nil
+				}
+			}
+
+			if err := c.DeleteScene(ctx, project.Name, scene.Name); err != nil {
+				if errors.Is(err, ucmix.ErrDeleteTimeout) {
+					return errs.CLIError{
+						Message: "delete failed: the mixer never confirmed it",
+						Hint:    fmt.Sprintf("run `ucmix ls scenes %q` to see whether the scene is gone", project.Name),
+					}
+				}
+				return errs.CLIError{Message: fmt.Sprintf("delete failed: %v", err)}
+			}
+			if g.json {
+				return printJSON(map[string]any{
+					"action": "delete", "project": project.Name, "scene": scene.Name,
+					"title": scene.Title, "ok": true,
+				})
+			}
+			fmt.Println(ui.Success(fmt.Sprintf("deleted %s / %s (slot %s)",
+				project.Title, scene.Title, scene.Name)))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt")
+	return cmd
+}
+
 // newResetCmd builds `reset [--scene] [--project] [--yes]`: reset the mixer to
 // factory defaults. DESTRUCTIVE — it requires --yes or an interactive
 // confirmation, and refuses in a non-tty without --yes. With neither --scene nor

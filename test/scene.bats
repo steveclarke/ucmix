@@ -115,6 +115,43 @@ load test_helper
   [[ "$output" == *"\"scenes\""* ]]
 }
 
+@test "delete removes a scene and frees its slot" {
+  run "${UCMIX_BIN}" delete "Main Live" "Encore" --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deleted Main Live / Encore"* ]]
+  [[ "$output" == *"02.Encore.scn"* ]]
+
+  run "${UCMIX_BIN}" ls scenes "01.Main Live.proj"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Encore"* ]]
+
+  # The freed slot is reused by the next store.
+  run "${UCMIX_BIN}" store "Main Live" "Reused"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"slot 02.Reused.scn"* ]]
+}
+
+@test "delete without --yes refuses in a non-tty" {
+  run "${UCMIX_BIN}" delete "Main Live" "Encore" </dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"destructive"* ]]
+  [[ "$output" == *"--yes"* ]]
+}
+
+@test "delete rejects an unknown scene" {
+  run "${UCMIX_BIN}" delete "Main Live" nosuchscene --yes
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no scene named"* ]]
+}
+
+@test "delete --json emits an envelope" {
+  run "${UCMIX_BIN}" delete "Main Live" "Opening Set" --yes --json
+  [ "$status" -eq 0 ]
+  echo "$output" | json_valid
+  [[ "$output" == *"\"action\""* ]]
+  [[ "$output" == *"delete"* ]]
+}
+
 @test "reset without --yes refuses in a non-tty" {
   run "${UCMIX_BIN}" reset </dev/null
   [ "$status" -ne 0 ]

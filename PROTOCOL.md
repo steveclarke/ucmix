@@ -196,8 +196,9 @@ completed. Both carry the same body shape:
 
 | Command | Acknowledgment |
 |---------|----------------|
-| `StorePreset` | `StoredPreset` |
-| `RestorePreset` | `RecalledPreset` |
+| `StorePreset` (JM) | `StoredPreset` |
+| `RestorePreset` (JM) | `RecalledPreset` |
+| `Dele…` (FR) | `DeletedPreset` |
 
 A store also emits `PS presets/loaded_scene_title`, `PS presets/loaded_scene_name`, and
 `PV presets/diskusage`.
@@ -241,17 +242,25 @@ strings, a resource and an argument:
 | List scenes in a project | `Listpresets/proj/<NN>.<name>.proj` | (empty) |
 | List channel presets in a category | `Listpresets/channel` | `<category>` |
 | Rename a scene | `Renapresets/proj/<NN>.<name>.proj/<NN>.<name>.scn` | `<new title>` |
+| Delete a scene | `Delepresets/proj/<NN>.<name>.proj/<NN>.<name>.scn` | (empty) |
 
-The resource is a **4-character verb followed by the path it acts on**. `List` and `Rena`
-are the two verbs confirmed from capture; delete and copy presumably exist but have not
-been observed, and guessing verbs against a board holding real scenes is not worth it.
+The resource is a **4-character verb followed by the path it acts on**. `List`, `Rena`, and
+`Dele` are confirmed from capture; a copy verb presumably exists but has not been observed,
+and guessing verbs against a board holding real scenes is not worth it.
 
 For listings the arg is empty, so the payload ends with the resource string followed by two
 null bytes. A rename puts the new display title in the arg; the slot file name keeps its
 original `NN.` prefix and the title changes.
 
-A rename is **not acknowledged** the way a store is — the board replies with a short `FD`
-whose meaning is unconfirmed. Verify a rename by re-listing the project.
+A **rename** is not acknowledged — the board replies only with an empty `FD` (`total` 0,
+`size` 0), a bare receipt carrying no listing. Verify a rename by re-listing the project.
+
+A **delete** is acknowledged, despite being an `FR`: the board answers with a `JM`
+`DeletedPreset` carrying the same body as a store ack, plus the empty `FD`. The deleted
+slot keeps its number and reverts to `* Empty Location *`, so the next store reuses it.
+
+Note that an empty `FD` is a receipt, not a listing. Treating it as one hands an empty file
+list to whatever list request happens to be in flight.
 
 **Reply** (`FD`) — the board streams the body across one or more `FD` frames. Each payload
 begins with a 14-byte header, then chunk data:

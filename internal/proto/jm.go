@@ -135,9 +135,14 @@ const (
 	// completed, carrying the same PresetAck body as a store. Observed on a 32R
 	// (2026-07-25).
 	JMRecalledPreset = "RecalledPreset"
+	// JMDeletedPreset is the board's confirmation that a preset was deleted. The
+	// delete request itself is an FR (the Dele verb), but the acknowledgment
+	// comes back as a JM like a store's. Observed on a 32R (2026-07-25).
+	JMDeletedPreset = "DeletedPreset"
 )
 
-// PresetAck is the body of a StoredPreset or RecalledPreset acknowledgment:
+// PresetAck is the body of a StoredPreset, RecalledPreset, or DeletedPreset
+// acknowledgment:
 //
 //	{"id": "StoredPreset", "presetFile": "presets/proj/03.X.proj/04.Y.scn",
 //	 "presetName": "Y", "presetType": "scn", "url": "presets"}

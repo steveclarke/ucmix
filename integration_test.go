@@ -299,3 +299,64 @@ func TestIntegrationNextSceneSlotAllocatesAndRefusesDuplicates(t *testing.T) {
 		t.Errorf("NextSceneSlot for an existing title = %v, want ErrSlotOccupied", err)
 	}
 }
+
+// A delete frees its slot: the scene disappears from the listing and the slot
+// becomes available to the next store.
+func TestIntegrationDeleteSceneFreesSlot(t *testing.T) {
+	b := fakeboard.New(map[string]any{"k": float32(1)})
+	addr := startFakeboard(t, b)
+	c := connectReal(t, addr)
+	ctx := context.Background()
+
+	const project = "01.Main Live.proj"
+	before, err := c.ListScenes(ctx, project)
+	if err != nil {
+		t.Fatalf("ListScenes: %v", err)
+	}
+	if len(before) == 0 {
+		t.Fatal("fake board has no scenes to delete")
+	}
+	target := before[0]
+
+	if err := c.DeleteScene(ctx, project, target.Name); err != nil {
+		t.Fatalf("DeleteScene: %v", err)
+	}
+
+	after, err := c.ListScenes(ctx, project)
+	if err != nil {
+		t.Fatalf("ListScenes after delete: %v", err)
+	}
+	for _, s := range after {
+		if s.Name == target.Name {
+			t.Fatalf("%q is still listed after delete", target.Name)
+		}
+	}
+	if len(after) != len(before)-1 {
+		t.Errorf("scene count = %d, want %d", len(after), len(before)-1)
+	}
+
+	// The freed slot is reusable, and keeps its slot number.
+	slot, err := c.NextSceneSlot(ctx, project, "Reused")
+	if err != nil {
+		t.Fatalf("NextSceneSlot after delete: %v", err)
+	}
+	prefix, _, _ := strings.Cut(target.Name, ".")
+	if want := prefix + ".Reused.scn"; slot != want {
+		t.Errorf("next slot = %q, want the freed slot %q", slot, want)
+	}
+}
+
+// A delete the board never acknowledges must fail rather than report success.
+func TestIntegrationDeleteWithoutAckFails(t *testing.T) {
+	b := fakeboard.New(map[string]any{"k": float32(1)})
+	b.SuppressStoreAck = true
+	addr := startFakeboard(t, b)
+	c := connectReal(t, addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+
+	if err := c.DeleteScene(ctx, "01.Main Live.proj", "01.Opening Set.scn"); err == nil {
+		t.Fatal("DeleteScene reported success with no acknowledgment from the board")
+	}
+}

@@ -92,7 +92,9 @@ rather than trusting this list to be complete.
 - `verify <config.yml>` / `apply <config.yml>` — board as code: diff / write a whole config
 - `store <project> <name>` — store the current state as a new scene (`--replace` to
   overwrite one); `recall <project> <scene>` — load a stored scene;
-  `rename <project> <scene> <new-name>` — retitle one. Project and scene arguments accept
+  `rename <project> <scene> <new-name>` — retitle one;
+  `delete <project> <scene>` — remove one (destructive; needs `--yes` or a prompt).
+  Project and scene arguments accept
   either the display title (`"135 Main Live"`, `"Opening"`) or the board's slot name
   (`"03.135 Main Live.proj"`, `"04.Opening.scn"`)
 - `reset` — factory reset (destructive; needs `--yes`)
@@ -136,9 +138,12 @@ ucmix store "135 Main Live" "Opening"                 # new scene, next free slo
 ucmix store "135 Main Live" "Opening" --replace        # overwrite it deliberately
 ucmix rename "135 Main Live" "Opening" "Opening Set"   # retitle, keeps its slot
 ucmix recall "135 Main Live" "Opening Set"
+ucmix delete "135 Main Live" "Opening Set" --yes      # destructive, frees the slot
 ```
 
-Deleting a scene is not supported — use UC Surface (the X on each row).
+`delete` frees the scene's slot, which the next `store` reuses. Like `store` and `recall`
+it waits for the board to confirm. It prompts before acting; `--yes` skips the prompt and
+is required when there is no terminal.
 
 ## Known limitations
 
@@ -150,8 +155,9 @@ Deleting a scene is not supported — use UC Surface (the X on each row).
   fresh connection (a fresh `get`). `set -f <file>` is the same batch write path without
   the verify.
 - `rename` is confirmed by re-listing the project, not by a board acknowledgment (the board
-  sends none for a rename). `reset` is still unconfirmed fire-and-forget — it reports that
-  the request was sent, not that the board acted on it.
+  sends none for a rename). `store`, `recall`, and `delete` all wait on a real one.
+  `reset` is still unconfirmed fire-and-forget — it reports that the request was sent, not
+  that the board acted on it.
 - HPF (Hz), limiter release curve, and reverb-type enums are not fully calibrated —
   their humanized conversions are approximate. Use raw values when exactness matters.
 - Some UCNET parameters have **no control in UC Surface** (e.g. an FX return's Main/LR
