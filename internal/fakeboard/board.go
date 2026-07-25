@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/steveclarke/ucmix/internal/proto"
+	"github.com/steveclarke/ucmix/internal/schema"
 	"github.com/steveclarke/ucmix/internal/state"
 )
 
@@ -227,7 +228,7 @@ func (b *Board) applyDelta(f proto.Frame) {
 	switch f.Code {
 	case proto.CodePV:
 		if k, v, err := proto.UnmarshalPV(f.Payload); err == nil {
-			b.tree.Apply(k, v)
+			b.tree.Apply(k, clampControl(k, v))
 		}
 	case proto.CodePS:
 		if k, v, err := proto.UnmarshalPS(f.Payload); err == nil {
@@ -237,6 +238,28 @@ func (b *Board) applyDelta(f proto.Frame) {
 		if k, raw, err := proto.UnmarshalPC(f.Payload); err == nil {
 			b.tree.Apply(k, packColor(raw))
 		}
+	}
+}
+
+// clampControl bounds a PV write to the 0..1 range a known control accepts, the
+// way a real board does. This is fidelity, not defensiveness: a 32R silently
+// pins an out-of-range write to the end of the control's travel and reports
+// nothing, which is how a whole board's worth of high-pass filters can end up
+// wide open with every write reporting success. A fake that stored 90.0 for a
+// 0..1 control would hide exactly the class of bug the read-back path exists to
+// catch. Unknown keys are not controls and pass through untouched.
+func clampControl(key string, v float32) float32 {
+	spec, known := schema.Lookup(key)
+	if !known || (spec.Kind != schema.KindFloat && spec.Kind != schema.KindBool) {
+		return v
+	}
+	switch {
+	case v < 0:
+		return 0
+	case v > 1:
+		return 1
+	default:
+		return v
 	}
 }
 

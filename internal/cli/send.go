@@ -35,5 +35,6 @@ func newSendCmd(g *globals) *cobra.Command {
 	}
 	// A level like -6dB otherwise looks like a flag; take positionals verbatim.
 	cmd.Flags().SetInterspersed(false)
+	addNoVerifyFlag(cmd, g)
 	return cmd
 }

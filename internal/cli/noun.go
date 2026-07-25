@@ -88,19 +88,25 @@ func resolveMixIndex(c *ucmix.Client, ref string) (int, error) {
 }
 
 // applyNoun parses one value against the schema, writes it over the already-
-// connected client, and reports the single write. The library holds the commit
-// barrier, so the caller neither sleeps nor closes early. This is the shared
-// write path for the single-value noun verbs (channel/mix/send).
+// connected client, and reports what the board holds afterwards. The library
+// holds the commit barrier, so the caller neither sleeps nor closes early. This
+// is the shared write path for the single-value noun verbs (channel/mix/send).
+//
+// It closes c: the read-back reads a fresh ZB on a new connection, which the
+// writing connection cannot supply.
 func applyNoun(ctx context.Context, g *globals, c *ucmix.Client, path, value string) error {
 	it, err := parseSetItem(path, value)
 	if err != nil {
+		_ = c.Close()
 		return err
 	}
-	if err := c.Set(ctx, it.path, it.value); err != nil {
+	werr := c.Set(ctx, it.path, it.value)
+	_ = c.Close()
+	if werr != nil {
 		return errs.CLIError{
-			Message: fmt.Sprintf("could not set %s: %v", it.path, err),
+			Message: fmt.Sprintf("could not set %s: %v", it.path, werr),
 			Hint:    "check the value is in range for this control",
 		}
 	}
-	return reportSet(g, []setItem{it})
+	return reportWrites(ctx, g, []setItem{it})
 }

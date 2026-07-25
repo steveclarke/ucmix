@@ -302,6 +302,31 @@ func tokenToClass(token string) string {
 	return `\d+`
 }
 
+// tolerances is how close two values in a taper's human unit must be to count as
+// the same setting. Wire positions are 32-bit floats and the tapers are
+// interpolations, so a value that round-trips through the board comes back a hair
+// off; comparing in human units needs a band rather than equality. Every reader
+// that compares a board value against a wanted one — config drift, post-write
+// read-back — uses this one table.
+var tolerances = map[string]float64{
+	"dB":    0.5,
+	"Hz":    5,
+	"input": 0.5,
+	"ms":    5,
+}
+
+// defaultTolerance covers a taper unit with no entry of its own.
+const defaultTolerance = 0.5
+
+// Tolerance returns the comparison band for a taper unit ("dB", "Hz", "ms",
+// "input").
+func Tolerance(unit string) float64 {
+	if t, ok := tolerances[unit]; ok {
+		return t
+	}
+	return defaultTolerance
+}
+
 // Lookup returns the KeySpec for a path and true if the path matches a known
 // key family, or the zero KeySpec and false otherwise. Unknown keys are raw
 // pass-through values, never an error.

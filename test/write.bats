@@ -119,3 +119,33 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"path value"* ]]
 }
+
+@test "a write the board clamps is reported as not taken and exits 1" {
+  # The board stores filter/hpf as a 0..1 position, so a Hz number pins it to the
+  # top. Reporting on send would call this a success; the read-back does not.
+  run "${UCMIX_BIN}" set line.ch3.filter.hpf 90
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"wrote 90, board holds 1"* ]]
+}
+
+@test "--no-verify reports the write on send without reading it back" {
+  run "${UCMIX_BIN}" set --no-verify line.ch3.filter.hpf 90
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"set line/ch3/filter/hpf = 90"* ]]
+  [[ "$output" != *"board holds"* ]]
+}
+
+@test "a batch names only the writes that did not take" {
+  run "${UCMIX_BIN}" set line.ch1.mute=on line.ch3.filter.hpf=90
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"set 2 values; 1 did not take"* ]]
+  [[ "$output" == *"wrote 90, board holds 1"* ]]
+}
+
+@test "set --json carries what the board holds" {
+  run "${UCMIX_BIN}" set --json line.ch3.filter.hpf 90
+  [ "$status" -eq 1 ]
+  echo "$output" | json_valid
+  [[ "$output" == *"\"ok\": false"* ]]
+  [[ "$output" == *"\"got\": 1"* ]]
+}

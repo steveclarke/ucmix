@@ -90,6 +90,7 @@ func newChannelCmd(g *globals) *cobra.Command {
 	// A fader value like -6dB otherwise looks like a flag; take positionals
 	// verbatim. Global flags still work before the positionals.
 	cmd.Flags().SetInterspersed(false)
+	addNoVerifyFlag(cmd, g)
 	return cmd
 }
 
