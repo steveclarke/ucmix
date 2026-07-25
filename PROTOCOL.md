@@ -184,6 +184,39 @@ use generic placeholders — substitute real project and scene file names.
   "presetFile": "presets/proj/<PROJECT>.proj/<NN>.<name>.scn" }
 ```
 
+### Acknowledgments — a preset write is not done until the board says so
+
+The board answers a store or recall with an inbound `JM` once the operation has
+completed. Both carry the same body shape:
+
+```json
+{ "id": "StoredPreset", "presetFile": "presets/proj/03.135 Main Live.proj/04.Opening.scn",
+  "presetName": "Opening", "presetType": "scn", "url": "presets" }
+```
+
+| Command | Acknowledgment |
+|---------|----------------|
+| `StorePreset` | `StoredPreset` |
+| `RestorePreset` | `RecalledPreset` |
+
+A store also emits `PS presets/loaded_scene_title`, `PS presets/loaded_scene_name`, and
+`PV presets/diskusage`.
+
+**These acknowledgments are mandatory, not informational.** The request itself is
+fire-and-forget: a client that sends `StorePreset` and closes the connection loses the
+write, because the board is still committing when the socket goes away. The observable
+symptom is a store that succeeds intermittently — it is a race, and it usually loses.
+Wait for the matching acknowledgment before reporting success, and match on `presetFile`,
+since the board announces every client's preset writes on every connection.
+
+`presetFile` must use the board's slot names, with the slot prefix and extension
+(`03.135 Main Live.proj`, `04.Opening.scn`). A path built from display titles is not
+honored. Enumerate the real names over `FR`/`FD` below.
+
+**Slot allocation is the client's job.** UC Surface reads the scene list, takes the first
+slot titled `* Empty Location *`, and reuses that slot's `NN.` prefix for the new name.
+Storing to an occupied slot overwrites it with no warning from the board.
+
 **Reset** the mixer. The two scope flags control what is cleared:
 ```json
 { "id": "ResetMixer", "resetSceneSettings": 1, "resetProjectSettings": 0,
@@ -193,7 +226,7 @@ use generic placeholders — substitute real project and scene file names.
 - `resetProjectSettings: 1` clears project-level settings.
 - **Both flags = 1 is a full factory wipe** — names, input patch, and all mixes are cleared.
 
-## FR / FD — enumerating presets
+## FR / FD — enumerating and renaming presets
 
 Listing projects and scenes uses the file-request pair `FR` → `FD`, not `JM`. This is what
 UC Surface sends for its Projects/Scenes screen; a real 32R answers immediately. Confirmed
@@ -202,14 +235,23 @@ against a capture (`internal/proto/testdata/uc-surface-listpresets.pcap`).
 **Request** (`FR`) — payload is `id` (u16 LE) followed by two null-terminated ASCII
 strings, a resource and an argument:
 
-| List | resource | arg |
-|------|----------|-----|
-| Projects | `Listpresets/proj` | (empty) |
-| Scenes in a project | `Listpresets/proj/<NN>.<name>.proj` | (empty) |
-| Channel presets in a category | `Listpresets/channel` | `<category>` |
+| Operation | resource | arg |
+|-----------|----------|-----|
+| List projects | `Listpresets/proj` | (empty) |
+| List scenes in a project | `Listpresets/proj/<NN>.<name>.proj` | (empty) |
+| List channel presets in a category | `Listpresets/channel` | `<category>` |
+| Rename a scene | `Renapresets/proj/<NN>.<name>.proj/<NN>.<name>.scn` | `<new title>` |
 
-For projects and scenes the arg is empty, so the payload ends with the resource string
-followed by two null bytes.
+The resource is a **4-character verb followed by the path it acts on**. `List` and `Rena`
+are the two verbs confirmed from capture; delete and copy presumably exist but have not
+been observed, and guessing verbs against a board holding real scenes is not worth it.
+
+For listings the arg is empty, so the payload ends with the resource string followed by two
+null bytes. A rename puts the new display title in the arg; the slot file name keeps its
+original `NN.` prefix and the title changes.
+
+A rename is **not acknowledged** the way a store is — the board replies with a short `FD`
+whose meaning is unconfirmed. Verify a rename by re-listing the project.
 
 **Reply** (`FD`) — the board streams the body across one or more `FD` frames. Each payload
 begins with a 14-byte header, then chunk data:

@@ -167,6 +167,19 @@ func TestStorePresetThenRestore(t *testing.T) {
 	// Store current state under a name.
 	c.send(t, proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(proto.StorePresetCmd{PresetFile: "scene-a"})})
 
+	// The board acknowledges the write; clients block on this before reporting
+	// success, so it must arrive before anything else is sent.
+	ack, err := c.readFrame(t, 2*time.Second)
+	if err != nil {
+		t.Fatalf("no ack after store: %v", err)
+	}
+	if ack.Code != proto.CodeJM {
+		t.Fatalf("ack code = %q, want JM", ack.Code)
+	}
+	if m, err := proto.ParseJM(ack.Payload); err != nil || m.ID != proto.JMStoredPreset {
+		t.Fatalf("ack id = %q (err %v), want StoredPreset", m.ID, err)
+	}
+
 	// Change the tree.
 	c.send(t, proto.Frame{Code: proto.CodePS, Payload: proto.MarshalPS("line/ch1/name", "Changed")})
 	// Give the board a moment to apply (single conn, no echo to read).

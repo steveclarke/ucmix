@@ -94,6 +94,7 @@ func newRootCmd() *cobra.Command {
 		newApplyCmd(g),
 		newRecallCmd(g),
 		newStoreCmd(g),
+		newRenameCmd(g),
 		newResetCmd(g),
 		newLsCmd(g),
 		newProfileCmd(g),

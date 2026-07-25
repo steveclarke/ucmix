@@ -21,6 +21,11 @@ type fakeTransport struct {
 	mu   sync.Mutex
 	sent []proto.Frame
 
+	// onSend, when set, runs after each frame is recorded. It lets a test react
+	// to an outbound frame — e.g. deliver the acknowledgment a real board would
+	// send back — without racing the code under test.
+	onSend func(proto.Frame)
+
 	in        chan proto.Frame
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -38,7 +43,11 @@ func (f *fakeTransport) Send(ctx context.Context, fr proto.Frame) error {
 	}
 	f.mu.Lock()
 	f.sent = append(f.sent, fr)
+	hook := f.onSend
 	f.mu.Unlock()
+	if hook != nil {
+		hook(fr)
+	}
 	return nil
 }
 
@@ -54,6 +63,36 @@ func (f *fakeTransport) Close() error {
 
 // deliver pushes an inbound frame to the client. Safe until Close.
 func (f *fakeTransport) deliver(fr proto.Frame) { f.in <- fr }
+
+// ackPresetCommands makes the transport answer StorePreset and RestorePreset
+// with the acknowledgment a real board sends, so the confirmation waits in
+// StoreScene/RecallScene complete. Each delivery runs in its own goroutine:
+// deliver blocks until the merge loop reads, and the merge loop cannot run while
+// Send is still on the caller's stack.
+func (f *fakeTransport) ackPresetCommands() {
+	replies := map[string]string{
+		"StorePreset":   proto.JMStoredPreset,
+		"RestorePreset": proto.JMRecalledPreset,
+	}
+	f.mu.Lock()
+	f.onSend = func(fr proto.Frame) {
+		if fr.Code != proto.CodeJM {
+			return
+		}
+		id, _ := jmField(fr.Payload, "id")
+		ackID, ok := replies[id]
+		if !ok {
+			return
+		}
+		presetFile, _ := jmField(fr.Payload, "presetFile")
+		go f.deliver(proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(map[string]string{
+			"id":         ackID,
+			"presetFile": presetFile,
+			"url":        "presets",
+		})})
+	}
+	f.mu.Unlock()
+}
 
 func (f *fakeTransport) sentFrames() []proto.Frame {
 	f.mu.Lock()
@@ -570,6 +609,7 @@ func TestRealSnapshotColorHumanizes(t *testing.T) {
 
 func TestJMSceneCommandBodies(t *testing.T) {
 	ft := newFakeTransport()
+	ft.ackPresetCommands()
 	c := connectWithZB(t, ft, map[string]any{})
 	ctx := context.Background()
 

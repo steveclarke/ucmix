@@ -1,6 +1,10 @@
 package proto
 
-import "encoding/json"
+import (
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+)
 
 // MarshalJM encodes a JM payload: a 4-byte little-endian length of the JSON body
 // followed by the JSON body itself. The frame wrapper (Encode) adds the header,
@@ -108,4 +112,71 @@ func (c RestorePresetCmd) MarshalJSON() ([]byte, error) {
 		PresetTargetSlave int    `json:"presetTargetSlave"`
 		PresetFile        string `json:"presetFile"`
 	}{"RestorePreset", "presets", "", 0, c.PresetFile})
+}
+
+// --- inbound JM ---
+
+// JMMessage is an inbound JM frame: the command id the board tagged it with and
+// the raw JSON body it carried. Callers switch on ID and unmarshal Body into the
+// matching struct.
+type JMMessage struct {
+	ID   string
+	Body []byte
+}
+
+// JM ids the board sends that we act on.
+const (
+	// JMStoredPreset is the board's confirmation that a StorePreset completed.
+	// It is the only positive acknowledgment of a preset write: the board emits
+	// it after the scene is on disk, so a store that never sees it did not
+	// happen. Observed on a 32R via packet capture (2026-07-25).
+	JMStoredPreset = "StoredPreset"
+	// JMRecalledPreset is the board's confirmation that a RestorePreset
+	// completed, carrying the same PresetAck body as a store. Observed on a 32R
+	// (2026-07-25).
+	JMRecalledPreset = "RecalledPreset"
+)
+
+// PresetAck is the body of a StoredPreset or RecalledPreset acknowledgment:
+//
+//	{"id": "StoredPreset", "presetFile": "presets/proj/03.X.proj/04.Y.scn",
+//	 "presetName": "Y", "presetType": "scn", "url": "presets"}
+//
+// PresetFile echoes the request's target, so a caller waiting on a specific
+// store can match on it and ignore acks for other clients' writes.
+type PresetAck struct {
+	PresetFile string `json:"presetFile"`
+	PresetName string `json:"presetName"`
+	PresetType string `json:"presetType"`
+}
+
+// ParseJM decodes an inbound JM payload into its id and raw JSON body. The
+// payload is a 4-byte little-endian body length followed by the JSON.
+func ParseJM(payload []byte) (JMMessage, error) {
+	if len(payload) < 4 {
+		return JMMessage{}, fmt.Errorf("proto: JM payload too short (%d bytes)", len(payload))
+	}
+	n := int(binary.LittleEndian.Uint32(payload[:4]))
+	body := payload[4:]
+	// Trust the declared length when it fits; a board that pads or truncates
+	// still yields parseable JSON from the remainder.
+	if n >= 0 && n <= len(body) {
+		body = body[:n]
+	}
+	var head struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &head); err != nil {
+		return JMMessage{}, fmt.Errorf("proto: parsing JM body: %w", err)
+	}
+	return JMMessage{ID: head.ID, Body: body}, nil
+}
+
+// UnmarshalPresetAck decodes a StoredPreset body.
+func UnmarshalPresetAck(body []byte) (PresetAck, error) {
+	var ack PresetAck
+	if err := json.Unmarshal(body, &ack); err != nil {
+		return PresetAck{}, fmt.Errorf("proto: parsing preset ack: %w", err)
+	}
+	return ack, nil
 }

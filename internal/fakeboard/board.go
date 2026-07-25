@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -39,6 +40,11 @@ type Board struct {
 	// and sends no reply — reproducing a board that never answers, which would
 	// hang an unbounded ListProjects/ListScenes wait.
 	SuppressListReply bool
+	// SuppressStoreAck, when true, performs the store or recall but sends no
+	// acknowledgment — reproducing a board whose confirmation never arrives, the
+	// case StoreScene/RecallScene must report as a failure rather than a false
+	// success.
+	SuppressStoreAck bool
 
 	mu       sync.Mutex // guards tree access grouping, scenes, conns, subscribed, accepted
 	tree     *state.Tree
@@ -125,6 +131,18 @@ func (b *Board) Close() error {
 
 // Snapshot returns a deep copy of the board's current tree (test helper).
 func (b *Board) Snapshot() map[string]any { return b.tree.Snapshot() }
+
+// Scenes returns the preset paths the board has stored, so a test can assert a
+// store actually landed rather than only that it was acknowledged.
+func (b *Board) Scenes() map[string]map[string]any {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make(map[string]map[string]any, len(b.scenes))
+	for k, v := range b.scenes {
+		out[k] = v
+	}
+	return out
+}
 
 // AcceptedConns returns how many connections the board has accepted since Start.
 // A batch write that reuses one held connection leaves this at 1 (test helper).
@@ -257,12 +275,18 @@ func (b *Board) handleJM(c *conn, f proto.Frame) {
 		}
 		_ = json.Unmarshal(body, &cmd)
 		b.restorePreset(cmd.PresetFile)
+		if !b.SuppressStoreAck {
+			b.ackPreset(c, proto.JMRecalledPreset, cmd.PresetFile)
+		}
 	case "StorePreset":
 		var cmd struct {
 			PresetFile string `json:"presetFile"`
 		}
 		_ = json.Unmarshal(body, &cmd)
 		b.storePreset(cmd.PresetFile)
+		if !b.SuppressStoreAck {
+			b.ackPreset(c, proto.JMStoredPreset, cmd.PresetFile)
+		}
 	}
 }
 
@@ -290,12 +314,37 @@ func (b *Board) restorePreset(name string) {
 }
 
 // storePreset snapshots the current tree into the scene store under name.
-// Nothing is pushed to clients (matches "store only").
+// No state is pushed to clients (matches "store only"); the acknowledgment is
+// sent separately by ackStore.
 func (b *Board) storePreset(name string) {
 	snap := b.tree.Snapshot()
 	b.mu.Lock()
 	b.scenes[name] = snap
 	b.mu.Unlock()
+}
+
+// ackPreset sends the StoredPreset/RecalledPreset acknowledgment a real board
+// emits once a preset command has completed. Clients treat its absence as "the
+// command did not happen", so a fake that stays silent (SuppressStoreAck)
+// exercises that path.
+func (b *Board) ackPreset(c *conn, id, presetFile string) {
+	name := presetFile
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	presetType := strings.TrimPrefix(filepath.Ext(name), ".")
+	name = strings.TrimSuffix(name, filepath.Ext(name))
+	if i := strings.Index(name, "."); i >= 0 {
+		name = name[i+1:] // drop the "NN." slot prefix
+	}
+	body := map[string]string{
+		"id":         id,
+		"presetFile": presetFile,
+		"presetName": name,
+		"presetType": presetType,
+		"url":        "presets",
+	}
+	c.write(proto.Encode(proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(body)}))
 }
 
 // handleFR answers a preset-list request (FR) with FD chunks carrying a canned

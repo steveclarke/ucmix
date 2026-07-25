@@ -52,8 +52,9 @@ type Client struct {
 	closeOnce sync.Once
 	closeErr  error
 
-	mu          sync.Mutex                // guards listWaiters and nextReqID
+	mu          sync.Mutex                // guards listWaiters, jmSubs and nextReqID
 	listWaiters []chan []proto.PresetFile // registered preset-list reply waiters
+	jmSubs      []chan proto.JMMessage    // registered inbound-JM subscribers
 	nextReqID   uint16                    // FR request id, incremented per list request
 }
 
@@ -122,7 +123,8 @@ func (c *Client) mergeLoop() {
 // handle applies one inbound frame to the tree and reports whether it was a ZB
 // snapshot (the signal Connect blocks on). PV/PS/PC become deltas; ZB replaces
 // the whole tree (a fresh ZB also arrives after recall/reset); FD chunks
-// reassemble into a preset-list reply routed to any pending list waiter.
+// reassemble into a preset-list reply routed to any pending list waiter; JM
+// carries the board's command acknowledgments, fanned out to any subscriber.
 func (c *Client) handle(f proto.Frame) (isZB bool) {
 	switch f.Code {
 	case proto.CodePV:
@@ -176,8 +178,50 @@ func (c *Client) handle(f proto.Frame) (isZB bool) {
 			return false
 		}
 		c.deliverList(files)
+	case proto.CodeJM:
+		// The board acknowledges commands with JM frames (e.g. StoredPreset
+		// after a preset write). Fan every one out to subscribers so a caller
+		// can block until its own command is confirmed.
+		if m, err := proto.ParseJM(f.Payload); err == nil {
+			c.deliverJM(m)
+		}
 	}
 	return false
+}
+
+// deliverJM fans an inbound JM message out to every subscriber. Sends are
+// non-blocking: a subscriber whose buffer is full drops the message rather than
+// stalling the merge loop.
+func (c *Client) deliverJM(m proto.JMMessage) {
+	c.mu.Lock()
+	subs := make([]chan proto.JMMessage, len(c.jmSubs))
+	copy(subs, c.jmSubs)
+	c.mu.Unlock()
+	for _, ch := range subs {
+		select {
+		case ch <- m:
+		default:
+		}
+	}
+}
+
+// subscribeJM registers a buffered subscriber for inbound JM messages and
+// returns it with a cancel that unregisters it. Callers must cancel.
+func (c *Client) subscribeJM(buf int) (<-chan proto.JMMessage, func()) {
+	ch := make(chan proto.JMMessage, buf)
+	c.mu.Lock()
+	c.jmSubs = append(c.jmSubs, ch)
+	c.mu.Unlock()
+	return ch, func() {
+		c.mu.Lock()
+		for i, s := range c.jmSubs {
+			if s == ch {
+				c.jmSubs = append(c.jmSubs[:i], c.jmSubs[i+1:]...)
+				break
+			}
+		}
+		c.mu.Unlock()
+	}
 }
 
 // deliverList hands a completed preset list to every pending waiter and clears
