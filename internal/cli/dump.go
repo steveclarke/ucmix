@@ -24,7 +24,7 @@ func newDumpCmd(g *globals) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dump [prefix]",
 		Short: "Print every mixer path and value (or --as-config as YAML)",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  requireArgs(cobra.MaximumNArgs(1), "dump takes at most one path prefix", ""),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := g.dialClient(cmd.Context())
 			if err != nil {

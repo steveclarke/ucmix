@@ -25,7 +25,8 @@ func newMixCmd(g *globals) *cobra.Command {
 		Use:   "mix <name|n> <verb> [value]",
 		Short: "Monitor-mix shortcuts (name, fader, limiter) over aux/ch{n}",
 		Long:  mixHelp(),
-		Args:  cobra.MinimumNArgs(2),
+		Args: requireArgs(cobra.MinimumNArgs(2), "mix needs a mix name or number and a verb",
+			"run `ucmix mix --help` to see the verbs"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref, verb := args[0], args[1]
 

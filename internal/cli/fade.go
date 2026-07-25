@@ -37,7 +37,7 @@ func newFadeCmd(g *globals) *cobra.Command {
 			"Target is a dB value (e.g. -6, +3 for relative) or `off` (silence).\n\n" +
 			"Example:\n  ucmix fade line/ch10/volume off --over 3s\n" +
 			"  ucmix fade line/ch10/volume -6 --over 2s",
-		Args: cobra.ExactArgs(2),
+		Args: requireArgs(cobra.ExactArgs(2), "fade needs a path and a target in dB (or `off`)", ""),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := normalizePath(args[0])
 			ctx := cmd.Context()

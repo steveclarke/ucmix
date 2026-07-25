@@ -12,7 +12,7 @@ func newSendCmd(g *globals) *cobra.Command {
 		Long: "Set how much of a channel feeds a monitor mix: line/ch{channel}/aux{mix}.\n\n" +
 			"A thin veneer over `set`. The channel and mix are numbers; the level is dB.",
 		Example: "  ucmix send 3 1 -6dB   # channel 3 into mix 1 at -6 dB",
-		Args:    cobra.ExactArgs(3),
+		Args:    requireArgs(cobra.ExactArgs(3), "send needs a channel, a mix, and a level in dB", ""),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ch, err := parseIndex(args[0])
 			if err != nil {
