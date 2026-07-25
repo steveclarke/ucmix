@@ -46,11 +46,12 @@ type Board struct {
 	// success.
 	SuppressStoreAck bool
 
-	mu       sync.Mutex // guards tree access grouping, scenes, conns, subscribed, accepted
-	tree     *state.Tree
-	scenes   map[string]map[string]any
-	conns    map[*conn]struct{}
-	accepted int // cumulative count of accepted connections (test assertion)
+	mu         sync.Mutex // guards tree access grouping, scenes, conns, subscribed, accepted
+	tree       *state.Tree
+	scenes     map[string]map[string]any
+	sceneFiles []proto.PresetFile // live scene roster served by FR listings; mutated by store/rename
+	conns      map[*conn]struct{}
+	accepted   int // cumulative count of accepted connections (test assertion)
 
 	ln        net.Listener
 	done      chan struct{}
@@ -71,10 +72,11 @@ type conn struct {
 // ZB encoder has no bool marker). The caller may mutate seed afterwards.
 func New(seed map[string]any) *Board {
 	b := &Board{
-		tree:   state.NewTree(),
-		scenes: make(map[string]map[string]any),
-		conns:  make(map[*conn]struct{}),
-		done:   make(chan struct{}),
+		tree:       state.NewTree(),
+		scenes:     make(map[string]map[string]any),
+		sceneFiles: initialSceneFiles(),
+		conns:      make(map[*conn]struct{}),
+		done:       make(chan struct{}),
 	}
 	b.tree.LoadSnapshot(coerceSeed(seed))
 	return b
@@ -284,6 +286,7 @@ func (b *Board) handleJM(c *conn, f proto.Frame) {
 		}
 		_ = json.Unmarshal(body, &cmd)
 		b.storePreset(cmd.PresetFile)
+		b.recordSceneWrite(cmd.PresetFile)
 		if !b.SuppressStoreAck {
 			b.ackPreset(c, proto.JMStoredPreset, cmd.PresetFile)
 		}
@@ -362,7 +365,18 @@ func (b *Board) handleFR(c *conn, f proto.Frame) {
 	case resource == "Listpresets/proj":
 		body = cannedProjectsJSON
 	case strings.HasPrefix(resource, "Listpresets/proj/"):
-		body = cannedScenesJSON
+		body = b.sceneListJSON()
+	case strings.HasPrefix(resource, proto.VerbRena):
+		// Rename: the arg after the resource cstr is the new title. A real board
+		// answers with an EMPTY FD (total 0, size 0) — an acknowledgment carrying
+		// no listing — so clients confirm a rename by re-listing.
+		b.renameScene(strings.TrimPrefix(resource, proto.VerbRena), frArg(f.Payload))
+		id := binary.LittleEndian.Uint16(f.Payload[0:2])
+		c.write(proto.Encode(proto.Frame{
+			Code:    proto.CodeFD,
+			Payload: proto.BuildFDPayload(id, 0, 0, nil),
+		}))
+		return
 	default:
 		return // unknown resource: no reply
 	}
@@ -382,6 +396,24 @@ func frResource(payload []byte) string {
 	rest := payload[2:]
 	if i := bytes.IndexByte(rest, 0); i >= 0 {
 		return string(rest[:i])
+	}
+	return string(rest)
+}
+
+// frArg extracts the second null-terminated string from an FR payload (2-byte id,
+// resource cstr, then arg cstr).
+func frArg(payload []byte) string {
+	if len(payload) < 2 {
+		return ""
+	}
+	rest := payload[2:]
+	i := bytes.IndexByte(rest, 0)
+	if i < 0 {
+		return ""
+	}
+	rest = rest[i+1:]
+	if j := bytes.IndexByte(rest, 0); j >= 0 {
+		return string(rest[:j])
 	}
 	return string(rest)
 }
@@ -421,14 +453,90 @@ var cannedProjectsJSON = []byte(`{"files":[` +
 	`{"name":"03._ Empty Location _.proj","title":"* Empty Location *"}` +
 	`]}`)
 
-// cannedScenesJSON is the fake board's scene list for any project: the project
-// config file, two occupied scenes, and one empty slot.
-var cannedScenesJSON = []byte(`{"files":[` +
-	`{"name":"Main Live.cnfg","title":"Main Live.cnfg"},` +
-	`{"name":"01.Opening Set.scn","title":"Opening Set"},` +
-	`{"name":"02.Encore.scn","title":"Encore"},` +
-	`{"name":"03._ Empty Location _.scn","title":"* Empty Location *"}` +
-	`]}`)
+// initialSceneFiles is the fake board's starting scene roster for any project:
+// the project config file, two occupied scenes, and two empty slots. The live
+// roster (Board.sceneFiles) starts as a copy and is mutated by stores and
+// renames, so a client can list back what it just wrote.
+func initialSceneFiles() []proto.PresetFile {
+	return []proto.PresetFile{
+		{Name: "Main Live.cnfg", Title: "Main Live.cnfg"},
+		{Name: "01.Opening Set.scn", Title: "Opening Set"},
+		{Name: "02.Encore.scn", Title: "Encore"},
+		{Name: "03._ Empty Location _.scn", Title: proto.EmptyPresetTitle},
+		{Name: "04._ Empty Location _.scn", Title: proto.EmptyPresetTitle},
+	}
+}
+
+// sceneListJSON renders the live scene roster as the {"files":[…]} body an FD
+// reply carries.
+func (b *Board) sceneListJSON() []byte {
+	b.mu.Lock()
+	files := append([]proto.PresetFile(nil), b.sceneFiles...)
+	b.mu.Unlock()
+	body, err := json.Marshal(struct {
+		Files []proto.PresetFile `json:"files"`
+	}{files})
+	if err != nil {
+		return []byte(`{"files":[]}`)
+	}
+	return body
+}
+
+// recordSceneWrite reflects a store into the roster so a later list shows it: an
+// existing slot of that name is left in place, otherwise the first empty slot
+// takes the name. presetFile is a full preset path.
+func (b *Board) recordSceneWrite(presetFile string) {
+	name := presetFile
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	if !strings.HasSuffix(name, ".scn") {
+		return
+	}
+	title := strings.TrimSuffix(name, ".scn")
+	if i := strings.Index(title, "."); i >= 0 {
+		title = title[i+1:]
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i, f := range b.sceneFiles {
+		if f.Name == name {
+			b.sceneFiles[i].Title = title
+			return
+		}
+	}
+	for i, f := range b.sceneFiles {
+		if f.Title == proto.EmptyPresetTitle {
+			b.sceneFiles[i] = proto.PresetFile{Name: name, Title: title}
+			return
+		}
+	}
+}
+
+// renameScene applies a rename to the roster: the entry keeps its slot number
+// and takes the new title, with the file name following the title as a real board
+// does. Reports whether a matching entry was found.
+func (b *Board) renameScene(presetFile, title string) bool {
+	name := presetFile
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i, f := range b.sceneFiles {
+		if f.Name != name {
+			continue
+		}
+		prefix, _, ok := strings.Cut(f.Name, ".")
+		if !ok {
+			return false
+		}
+		b.sceneFiles[i] = proto.PresetFile{Name: prefix + "." + title + ".scn", Title: title}
+		return true
+	}
+	return false
+}
 
 // pushZBToAll sends a fresh full ZB snapshot to every subscribed connection.
 func (b *Board) pushZBToAll() {

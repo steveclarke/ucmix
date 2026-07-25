@@ -173,6 +173,12 @@ func (c *Client) handle(f proto.Frame) (isZB bool) {
 		if !complete {
 			return false
 		}
+		if len(body) == 0 {
+			// An empty FD is a bare command acknowledgment, not a listing — a
+			// rename answers this way. Delivering it would hand an empty list to
+			// whichever list request is in flight.
+			return false
+		}
 		files, err := proto.ParsePresetList(body)
 		if err != nil {
 			return false

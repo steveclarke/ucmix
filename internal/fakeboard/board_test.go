@@ -231,9 +231,19 @@ func TestListScenesFR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing FD reply: %v", err)
 	}
-	// Leading .cnfg entry + two scenes + one empty slot.
-	if len(files) != 4 || files[1].Title != "Opening Set" {
+	// Leading .cnfg entry, then the occupied scenes, then the empty slots that
+	// make slot allocation testable.
+	if len(files) < 4 || files[0].Title != "Main Live.cnfg" || files[1].Title != "Opening Set" {
 		t.Fatalf("scenes reply = %+v", files)
+	}
+	empties := 0
+	for _, f := range files {
+		if f.Title == proto.EmptyPresetTitle {
+			empties++
+		}
+	}
+	if empties == 0 {
+		t.Errorf("scenes reply has no empty slot: %+v", files)
 	}
 }
 
