@@ -1,12 +1,15 @@
 # Synthetic board-as-code fixture for the apply/verify/dump round-trip tests.
-# Generic names only — no real board or venue data. Exercises the five traps
+# Generic names only — no real board or venue data. Exercises the six traps
 # the phase-7 tests care about: a fader (the ×100 read-scale trap), a monitor
-# send (resolved by mix name), a stereo link, a limiter, and name strings.
+# send (resolved by mix name), a stereo link, a limiter, name strings, and a
+# color (declared as 6 hex digits, reported by the board as a packed integer —
+# issue #30).
 version: 1
 
 channels:
   1:
     name: "Vocals"
+    color: "8f96a3"   # 6-digit hex; the board reports 4288910991 (issue #30)
     link: true        # stereo link (odd channel = pair master)
     fader: -6         # volume: the read-scale trap (-6 dB -> wire 0.746 -> reads 74.6)
     mute: false

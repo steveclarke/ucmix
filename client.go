@@ -2,12 +2,12 @@ package ucmix
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/steveclarke/ucmix/internal/color"
 	"github.com/steveclarke/ucmix/internal/proto"
 	"github.com/steveclarke/ucmix/internal/schema"
 	"github.com/steveclarke/ucmix/internal/state"
@@ -137,11 +137,11 @@ func (c *Client) handle(f proto.Frame) (isZB bool) {
 		}
 	case proto.CodePC:
 		if k, raw, err := proto.UnmarshalPC(f.Payload); err == nil {
-			c.tree.Apply(k, raw)
+			c.tree.Apply(k, canonicalChars(k, raw))
 		}
 	case proto.CodeZB:
 		if m, err := proto.ParseZB(f.Payload); err == nil {
-			c.tree.LoadSnapshot(m)
+			c.tree.LoadSnapshot(canonicalSnapshot(m))
 			return true
 		}
 	case proto.CodeCK:
@@ -156,7 +156,7 @@ func (c *Client) handle(f proto.Frame) (isZB bool) {
 			return false
 		}
 		if m, err := proto.ParseZB(blob); err == nil {
-			c.tree.LoadSnapshot(m)
+			c.tree.LoadSnapshot(canonicalSnapshot(m))
 			return true
 		}
 	case proto.CodeFD:
@@ -253,8 +253,10 @@ func (c *Client) Close() error {
 
 // Get returns the value at path, humanized through the schema: floats are
 // divided by ReadScale and passed through the taper (dB/Hz/input); bools become
-// Go bools; strings and raw chars pass through. Unknown keys return the raw
-// stored value. The second result reports whether the path is present.
+// Go bools; strings and colors pass through (a color is canonicalized on the way
+// into the tree, so it is already the canonical RGBA hex string). Unknown keys
+// return the raw stored value. The second result reports whether the path is
+// present.
 func (c *Client) Get(path string) (any, bool) {
 	raw, ok := c.tree.Get(path)
 	if !ok {
@@ -282,46 +284,53 @@ func (c *Client) Get(path string) (any, bool) {
 		}
 		return pos, true
 	case schema.KindChars:
-		return humanizeColor(raw), true
+		return raw, true
 	default:
 		return raw, true
 	}
 }
 
-// humanizeColor normalizes a stored color to its RGBA byte form so the read is
-// symmetric with the write (which parses an RGB(A) hex string into these bytes).
-// A snapshot stores the color ABGR-packed into an integer — the little-endian
-// read of the wire bytes R,G,B,A — so it is unpacked back to [R,G,B,A]; a live
-// PC delta already carries the bytes and passes through. The CLI renders the
-// bytes as hex (e.g. []byte{0x4e,0xd2,0xff,0xff} → "4ed2ffff").
-func humanizeColor(raw any) any {
-	if p, ok := toUint32(raw); ok {
-		return []byte{byte(p), byte(p >> 8), byte(p >> 16), byte(p >> 24)}
+// canonicalSnapshot rewrites every KindChars value in a freshly parsed snapshot
+// to its canonical form before it reaches the tree, so the tree holds exactly
+// one representation of a color no matter how it arrived. Only integer and byte
+// values are candidates (a snapshot is overwhelmingly floats and strings), which
+// keeps the schema lookup off the hot path for the rest of the tree.
+func canonicalSnapshot(m map[string]any) map[string]any {
+	for k, v := range m {
+		switch v.(type) {
+		case int, int32, int64, uint32, uint64, []byte:
+			m[k] = canonicalChars(k, v)
+		}
 	}
-	return raw
+	return m
 }
 
-// toUint32 coerces an integer color value (as ZB decodes it — int or int64) to
-// a uint32. Non-integer kinds (e.g. a []byte delta) report false.
-func toUint32(v any) (uint32, bool) {
-	switch n := v.(type) {
-	case int:
-		return uint32(n), true
-	case int64:
-		return uint32(n), true
-	case int32:
-		return uint32(n), true
-	default:
-		return 0, false
+// canonicalChars normalizes a value bound for a KindChars key to the canonical
+// color rendering — 8 lowercase RGBA hex digits. A board reports a color as an
+// ABGR-packed integer in a snapshot and as raw RGBA bytes in a live PC delta;
+// both land in the tree as the same string. Values on other keys, and chars
+// values that are not colors, pass through untouched.
+func canonicalChars(path string, v any) any {
+	spec, known := schema.Lookup(path)
+	if !known || spec.Kind != schema.KindChars {
+		return v
 	}
+	if h, ok := color.Canonical(v); ok {
+		return h
+	}
+	return v
 }
 
-// GetRaw returns the raw wire value at path with no schema humanizing.
+// GetRaw returns the stored wire value at path with no schema humanizing.
+// Colors are the one value normalized on the way in: the tree holds the
+// canonical RGBA hex string rather than whichever of the board's two encodings
+// delivered it, so raw and humanized reads of a color agree.
 func (c *Client) GetRaw(path string) (any, bool) {
 	return c.tree.Get(path)
 }
 
-// Snapshot returns a deep copy of the whole tree as raw wire values.
+// Snapshot returns a deep copy of the whole tree as wire values (colors as
+// canonical RGBA hex — see [Client.GetRaw]).
 func (c *Client) Snapshot() map[string]any {
 	return c.tree.Snapshot()
 }
@@ -496,16 +505,17 @@ func toStringVal(v any) (string, bool) {
 	return s, ok
 }
 
-// toCharsVal coerces a KindChars value: []byte passes through verbatim; a string
-// is decoded as hex (e.g. a color "4ed2ff"). Anything else is an error.
+// toCharsVal coerces a KindChars value to its wire bytes: []byte passes through
+// verbatim; a string is parsed as a color hex, gaining the opaque alpha when it
+// is 6 digits (e.g. "4ed2ff" → 4e d2 ff ff). Anything else is an error.
 func toCharsVal(v any) ([]byte, error) {
 	switch b := v.(type) {
 	case []byte:
 		return b, nil
 	case string:
-		raw, err := hex.DecodeString(b)
+		raw, err := color.Parse(b)
 		if err != nil {
-			return nil, fmt.Errorf("chars value %q is not hex: %w", b, err)
+			return nil, fmt.Errorf("chars value: %w", err)
 		}
 		return raw, nil
 	default:

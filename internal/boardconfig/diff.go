@@ -1,14 +1,17 @@
 package boardconfig
 
 import (
+	"bytes"
 	"math"
 
+	"github.com/steveclarke/ucmix/internal/color"
 	"github.com/steveclarke/ucmix/internal/schema"
 )
 
 // Mismatch is one desired path whose snapshot value differs from the desired
-// value. Want and Got are humanized: dB/Hz/input for tapered keys, the wire
-// value otherwise. Got is nil when the path is absent from the snapshot.
+// value. Want and Got are humanized: dB/Hz/input for tapered keys, canonical
+// RGBA hex for colors, the wire value otherwise. Got is nil when the path is
+// absent from the snapshot.
 type Mismatch struct {
 	Path string
 	Want any
@@ -42,6 +45,20 @@ func Diff(desired []Desired, snapshot map[string]any) []Mismatch {
 			continue
 		}
 		spec, known := schema.Lookup(d.Path)
+		if known && spec.Kind == schema.KindChars {
+			// Colors arrive in three shapes (packed int from a snapshot, RGBA
+			// bytes from a live delta, hex from the config). Compare — and
+			// report — the canonical rendering of each side.
+			wantC, okW := color.Canonical(d.WireValue)
+			gotC, okG := color.Canonical(got)
+			if okW && okG {
+				if wantC != gotC {
+					out = append(out, Mismatch{Path: d.Path, Want: wantC, Got: gotC})
+				}
+				continue
+			}
+			// Fall through to value comparison for an unrecognized chars value.
+		}
 		if known && spec.Taper != nil {
 			wantH, okW := asFloat(d.HumanValue)
 			gotRaw, okG := asFloat(got)
@@ -75,12 +92,19 @@ func humanOrWire(d Desired) any {
 }
 
 // valuesEqual compares two wire values loosely: numbers within an epsilon,
-// bool/number cross-type by truthiness, everything else by ==.
+// bool/number cross-type by truthiness, byte payloads bytewise, everything else
+// by ==. Byte slices are handled explicitly because == panics on uncomparable
+// types when both sides hold one.
 func valuesEqual(a, b any) bool {
 	af, aok := asFloat(a)
 	bf, bok := asFloat(b)
 	if aok && bok {
 		return math.Abs(af-bf) <= floatEpsilon
+	}
+	ab, aIsBytes := a.([]byte)
+	bb, bIsBytes := b.([]byte)
+	if aIsBytes || bIsBytes {
+		return aIsBytes && bIsBytes && bytes.Equal(ab, bb)
 	}
 	return a == b
 }

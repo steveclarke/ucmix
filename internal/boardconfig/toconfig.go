@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/steveclarke/ucmix/internal/color"
 	"github.com/steveclarke/ucmix/internal/schema"
 )
 
@@ -14,23 +15,22 @@ import (
 // keys the schema knows how to model in a Config, and converts each wire value
 // back to its human form (÷ReadScale then taper.FromWire for tapered floats;
 // verbatim otherwise), collapsing the sugar Compile expands: the link/stereo
-// triples fold back to link:/stereo:, aux send indices to auxN keys, color alpha
-// is stripped, and calibrated enums (pre mode, FX type) map back to their names.
+// triples fold back to link:/stereo:, aux send indices to auxN keys, colors to
+// canonical RGBA hex, and calibrated enums (pre mode, FX type) map back to their
+// names.
 //
 // It is deliberately lossy. The invariant is round-trip cleanliness, not
 // byte-identity: Compile(ToConfig(snapshot)) Diffs clean against snapshot for
 // every modeled field. Concretely:
 //
-//   - Round-trips: channel name/icon/link/patch/48v/main/fader/mute, channel
-//     monitor sends (as auxN keys) and FX sends, mix name/stereo/fader/limiter,
-//     calibrated pre mode and FX type, FX-return name/sends/mains, HPF.
+//   - Round-trips: channel name/icon/color/link/patch/48v/main/fader/mute,
+//     channel monitor sends (as auxN keys) and FX sends, mix
+//     name/stereo/fader/limiter, calibrated pre mode and FX type, FX-return
+//     name/sends/mains, HPF.
 //   - Dropped: unmodeled keys (they carry no Config field), plus modeled-but-
 //     unmodeled-in-Config keys (solo, polarity, pan, preampgain, EQ, comp, and
 //     the raw assign/linkmaster/panlinkstate members of a link triple — the
-//     latter are re-derived from link/stereo on Compile). Color is dropped too:
-//     Compile encodes it as a hex string while the board reports raw RGBA bytes,
-//     so a color line cannot Diff-clean — color stays settable via `set` but is
-//     not part of the dump round-trip.
+//     latter are re-derived from link/stereo on Compile).
 //   - Does not round-trip: uncalibrated pre-mode / FX-type enum values (dropped,
 //     since there is no name for them); duplicate mix usernames (Load rejects
 //     them).
@@ -104,6 +104,8 @@ func (a *configAccumulator) channelKey(path string, val any) {
 		ch.Name = strPtr(val)
 	case "iconid":
 		ch.Icon = strPtr(val)
+	case "color":
+		ch.Color = colorPtr(val)
 	case "48v":
 		ch.Phantom = boolPtr(val)
 	case "lr":
@@ -381,6 +383,17 @@ func strPtr(val any) *string {
 		return &s
 	}
 	return nil
+}
+
+// colorPtr returns a pointer to the canonical RGBA hex form of a wire color —
+// the board reports the ABGR-packed integer, a live delta carries the raw bytes,
+// and both render as the same 8 hex digits Compile accepts back.
+func colorPtr(val any) *string {
+	h, ok := color.Canonical(val)
+	if !ok {
+		return nil
+	}
+	return &h
 }
 
 // boolPtr returns a pointer to the bool form of a wire value (non-zero = true).

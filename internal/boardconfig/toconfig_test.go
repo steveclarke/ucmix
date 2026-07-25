@@ -2,6 +2,8 @@ package boardconfig
 
 import (
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // modeledSnapshot is a raw wire snapshot (plain 0..1 wire, as a real 32R returns
@@ -24,8 +26,9 @@ func modeledSnapshot() map[string]any {
 		"line/ch1/lr":           1.0,
 		"line/ch1/volume":       0.746, // -6 dB
 		"line/ch1/mute":         0.0,
-		"line/ch1/aux5":         0.746,   // -6 dB send
-		"line/ch1/adc_src":      0.78125, // input 25
+		"line/ch1/aux5":         0.746,             // -6 dB send
+		"line/ch1/adc_src":      0.78125,           // input 25
+		"line/ch1/color":        int64(4288910991), // ABGR-packed 8f96a3ff
 		// mix 5 (odd stereo master) with a limiter
 		"aux/ch5/username":        "Wedges",
 		"aux/ch5/link":            1.0,
@@ -106,11 +109,8 @@ func TestToConfigDropsUnmodeledKeys(t *testing.T) {
 		t.Fatalf("ToConfig: %v", err)
 	}
 	// pan and eq are modeled in the schema but not in Config → no field carries
-	// them, so ch1 must not have gained a Color/HPF/etc from them.
+	// them, so ch1 must not have gained an HPF/etc from them.
 	ch := cfg.Channels[1]
-	if ch.Color != nil {
-		t.Errorf("ch1 color = %v, want nil (color is not dumped)", *ch.Color)
-	}
 	if ch.HPF != nil {
 		t.Errorf("ch1 hpf = %v, want nil (no hpf key in snapshot)", ch.HPF)
 	}
@@ -175,5 +175,52 @@ func TestHPFInversion(t *testing.T) {
 	raw, _ := ToConfig(map[string]any{"line/ch1/filter/hpf": 0.06})
 	if h := raw.Channels[1].HPF; h == nil || h.Raw == nil || *h.Raw != 0.06 {
 		t.Errorf("hpf 0.06 = %v, want raw:0.06", h)
+	}
+}
+
+// TestToConfigEmitsCanonicalColor is the issue #30 round-trip half: a color in
+// the snapshot (the ABGR-packed integer a real board reports) must come back as
+// canonical hex, so `dump --as-config` then `verify` is clean on a board with
+// colors set. Master drops color entirely, so this fails there.
+func TestToConfigEmitsCanonicalColor(t *testing.T) {
+	cfg, err := ToConfig(modeledSnapshot())
+	if err != nil {
+		t.Fatalf("ToConfig: %v", err)
+	}
+	ch := cfg.Channels[1]
+	if ch.Color == nil {
+		t.Fatal("channel 1 color = nil, want the canonical hex for 4288910991")
+	}
+	if *ch.Color != "8f96a3ff" {
+		t.Errorf("channel 1 color = %q, want \"8f96a3ff\"", *ch.Color)
+	}
+}
+
+// TestToConfigColorSurvivesYAML pins the `dump --as-config | verify` path end to
+// end for color: the dumped config must marshal to YAML, load back, and compile
+// to the same wire value — including an all-numeric color, which YAML would
+// otherwise read back as an integer.
+func TestToConfigColorSurvivesYAML(t *testing.T) {
+	for _, packed := range []int64{4288910991, 0, 0x78563412} {
+		snap := map[string]any{"line/ch1/color": packed}
+		cfg, err := ToConfig(snap)
+		if err != nil {
+			t.Fatalf("ToConfig: %v", err)
+		}
+		out, err := yaml.Marshal(cfg)
+		if err != nil {
+			t.Fatalf("yaml.Marshal: %v", err)
+		}
+		loaded, err := Load(out)
+		if err != nil {
+			t.Fatalf("Load(%q): %v", out, err)
+		}
+		desired, err := Compile(loaded)
+		if err != nil {
+			t.Fatalf("Compile: %v", err)
+		}
+		if drift := Diff(desired, snap); len(drift) != 0 {
+			t.Errorf("packed %d drifted after a YAML round-trip: %+v", packed, drift)
+		}
 	}
 }

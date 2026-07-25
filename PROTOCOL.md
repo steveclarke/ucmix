@@ -91,6 +91,10 @@ match on the connIdentity a request was sent with rather than hard-coding one.
 - **bool** — a float, `1.0` (true) or `0.0` (false).
 - **string** — UTF-8 with a single trailing null byte.
 - **color** — hex color digits followed by an alpha byte, carried in a `PC` message.
+  A full snapshot (`ZB`) instead reports the color as an integer: the
+  little-endian read of those same R,G,B,A bytes (e.g. `8f96a3ff` →
+  `4288910991`). ucmix folds both encodings to one canonical rendering, 8
+  lowercase RGBA hex digits, on the way into its state tree.
 - **key separator.** In `PV`/`PC`/`PS` payloads the key is followed by a null terminator
   and a 2-byte "part A" field, i.e. `key` + `\x00` + two bytes. The two bytes are normally
   `00 00`; `00 01` has been observed on some filter-group deltas.
