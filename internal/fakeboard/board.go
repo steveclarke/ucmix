@@ -366,6 +366,19 @@ func (b *Board) handleFR(c *conn, f proto.Frame) {
 		body = cannedProjectsJSON
 	case strings.HasPrefix(resource, "Listpresets/proj/"):
 		body = b.sceneListJSON()
+	case strings.HasPrefix(resource, proto.VerbDele):
+		// Delete: the slot reverts to an empty location and is reusable. Unlike a
+		// rename this IS acknowledged, with a JM carrying the store-ack body.
+		presetFile := strings.TrimPrefix(resource, proto.VerbDele)
+		b.deleteScene(presetFile)
+		if !b.SuppressStoreAck {
+			b.ackPreset(c, proto.JMDeletedPreset, presetFile)
+		}
+		c.write(proto.Encode(proto.Frame{
+			Code:    proto.CodeFD,
+			Payload: proto.BuildFDPayload(binary.LittleEndian.Uint16(f.Payload[0:2]), 0, 0, nil),
+		}))
+		return
 	case strings.HasPrefix(resource, proto.VerbRena):
 		// Rename: the arg after the resource cstr is the new title. A real board
 		// answers with an EMPTY FD (total 0, size 0) — an acknowledgment carrying
@@ -511,6 +524,32 @@ func (b *Board) recordSceneWrite(presetFile string) {
 			b.sceneFiles[i] = proto.PresetFile{Name: name, Title: title}
 			return
 		}
+	}
+}
+
+// deleteScene empties a roster slot, keeping its slot number so it can be reused
+// by the next store — the same shape a real board leaves behind.
+func (b *Board) deleteScene(presetFile string) {
+	name := presetFile
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i, f := range b.sceneFiles {
+		if f.Name != name {
+			continue
+		}
+		prefix, _, ok := strings.Cut(f.Name, ".")
+		if !ok {
+			return
+		}
+		b.sceneFiles[i] = proto.PresetFile{
+			Name:  prefix + "._ Empty Location _.scn",
+			Title: proto.EmptyPresetTitle,
+		}
+		delete(b.scenes, presetFile)
+		return
 	}
 }
 

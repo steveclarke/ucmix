@@ -26,16 +26,20 @@ import "encoding/binary"
 //
 //	"List" — enumerate the path; the board answers with the FD chunks above.
 //	"Rena" — rename the preset at the path to arg (the new display title).
+//	"Dele" — delete the preset at the path; arg is empty.
 //
 // A rename therefore reuses this same payload with no wire changes:
 //
 //	rename a scene: resource "Renapresets/proj/<proj>/<scene>.scn", arg "<new title>"
+//	delete a scene: resource "Delepresets/proj/<proj>/<scene>.scn", arg ""
 //
-// Other verbs (delete, copy) are presumed to exist but have not been observed;
-// do not guess them against a board holding real scenes.
+// Unlike a rename, a delete IS acknowledged: the board answers with a JM
+// DeletedPreset carrying the same body as a store ack. Other verbs (copy) are
+// presumed to exist but have not been observed; do not guess them against a
+// board holding real scenes.
 //
 // Observed on a 32R (v0.4.0) via UC Surface packet captures (list: 2026-07-24,
-// rename: 2026-07-25).
+// rename and delete: 2026-07-25).
 
 // MarshalFR builds an FR request payload for resource and arg. Pass an empty arg
 // for project and scene listings.
@@ -56,4 +60,5 @@ func MarshalFR(id uint16, resource, arg string) []byte {
 const (
 	VerbList = "List"
 	VerbRena = "Rena"
+	VerbDele = "Dele"
 )

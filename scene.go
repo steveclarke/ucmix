@@ -51,6 +51,10 @@ var ErrStoreTimeout = errors.New("ucmix: timed out waiting for the board to conf
 // the recall.
 var ErrRecallTimeout = errors.New("ucmix: timed out waiting for the board to confirm the recall")
 
+// ErrDeleteTimeout is returned by DeleteScene when the board never acknowledges
+// the delete. The scene may or may not be gone; re-list to find out.
+var ErrDeleteTimeout = errors.New("ucmix: timed out waiting for the board to confirm the delete")
+
 // ErrSlotOccupied is returned when a store target names a slot that already
 // holds a scene. Overwriting is destructive and never implicit.
 var ErrSlotOccupied = errors.New("ucmix: that scene slot is already in use")
@@ -87,15 +91,26 @@ func (c *Client) StoreScene(ctx context.Context, project, scene string) error {
 		proto.JMStoredPreset, ErrStoreTimeout)
 }
 
-// presetCommand sends a preset command and blocks until the board answers with
-// ackID for this exact presetFile. Matching on the file matters: the board
-// announces every client's preset writes on every connection, so an unmatched
-// ack would confirm somebody else's work.
-//
-// When the caller supplies no deadline, the wait is bounded and a expiry surfaces
-// as timeoutErr; a caller-driven cancel passes through unchanged.
+// presetCommand sends a JM preset command and blocks until the board confirms
+// it. Store and recall take this path; delete sends an FR instead and calls
+// awaitPresetAck directly.
 func (c *Client) presetCommand(ctx context.Context, presetFile string, cmd any, ackID string, timeoutErr error) error {
-	// Subscribe before sending so an ack cannot land before we are listening.
+	return c.awaitPresetAck(ctx, presetFile, ackID, timeoutErr, func(ctx context.Context) error {
+		return c.sendJM(ctx, cmd)
+	})
+}
+
+// awaitPresetAck runs send and blocks until the board answers with ackID for
+// this exact presetFile. Matching on the file matters: the board announces every
+// client's preset operations on every connection, so an unmatched ack would
+// confirm somebody else's work.
+//
+// send runs after the subscription is registered, so an acknowledgment cannot
+// arrive before anyone is listening for it.
+//
+// When the caller supplies no deadline, the wait is bounded and an expiry
+// surfaces as timeoutErr; a caller-driven cancel passes through unchanged.
+func (c *Client) awaitPresetAck(ctx context.Context, presetFile, ackID string, timeoutErr error, send func(context.Context) error) error {
 	acks, unsubscribe := c.subscribeJM(8)
 	defer unsubscribe()
 
@@ -108,7 +123,7 @@ func (c *Client) presetCommand(ctx context.Context, presetFile string, cmd any, 
 		timed = true
 	}
 
-	if err := c.sendJM(bounded, cmd); err != nil {
+	if err := send(bounded); err != nil {
 		return err
 	}
 
@@ -163,6 +178,28 @@ func (c *Client) RenameScene(ctx context.Context, project, scene, title string) 
 		}
 	}
 	return fmt.Errorf("ucmix: the board did not apply the rename to %q", title)
+}
+
+// DeleteScene deletes a stored scene and waits for the board to confirm it (FR
+// with the Dele verb out, JM DeletedPreset back). The slot becomes empty and is
+// reusable by the next store.
+//
+// project and scene are slot names. This is destructive and irreversible on the
+// board; the CLI confirms before calling it.
+func (c *Client) DeleteScene(ctx context.Context, project, scene string) error {
+	file := buildPresetFile(project, scene)
+
+	return c.awaitPresetAck(ctx, file, proto.JMDeletedPreset, ErrDeleteTimeout,
+		func(ctx context.Context) error {
+			c.mu.Lock()
+			c.nextReqID++
+			id := c.nextReqID
+			c.mu.Unlock()
+			return c.t.Send(ctx, proto.Frame{
+				Code:    proto.CodeFR,
+				Payload: proto.MarshalFR(id, proto.VerbDele+file, ""),
+			})
+		})
 }
 
 // ResolveProject turns a project title or slot name into the board's slot name.

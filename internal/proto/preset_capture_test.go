@@ -93,3 +93,37 @@ func TestRenameRequestMatchesCapture(t *testing.T) {
 		t.Errorf("rename request does not match the capture\n got: %q\nwant: %q", got, want)
 	}
 }
+
+// The delete request ucmix builds must be byte-identical to UC Surface's.
+func TestDeleteRequestMatchesCapture(t *testing.T) {
+	want := readFixture(t, "fr-delete-request.bin")
+
+	resource := proto.VerbDele + "presets/proj/03.135 Main Live.proj/07.zz-slotmsg-final.scn"
+	got := proto.MarshalFR(1, resource, "")
+
+	if string(got) != string(want) {
+		t.Errorf("delete request does not match the capture\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// A delete is acknowledged with the same body shape as a store.
+func TestDeletedPresetAckFromCapture(t *testing.T) {
+	m, err := proto.ParseJM(readFixture(t, "jm-deletedpreset-ack.bin"))
+	if err != nil {
+		t.Fatalf("parsing captured ack: %v", err)
+	}
+	if m.ID != proto.JMDeletedPreset {
+		t.Fatalf("ack id = %q, want %q", m.ID, proto.JMDeletedPreset)
+	}
+
+	ack, err := proto.UnmarshalPresetAck(m.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "presets/proj/03.135 Main Live.proj/07.zz-slotmsg-final.scn"; ack.PresetFile != want {
+		t.Errorf("presetFile = %q, want %q", ack.PresetFile, want)
+	}
+	if want := "zz-slotmsg-final"; ack.PresetName != want {
+		t.Errorf("presetName = %q, want %q", ack.PresetName, want)
+	}
+}
