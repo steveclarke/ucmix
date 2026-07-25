@@ -48,6 +48,6 @@ func newGetCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&raw, "raw", false, "show the raw wire value (skip humanizing)")
+	cmd.Flags().BoolVar(&raw, "raw", false, "show the wire value (skip humanizing; a color stays canonical hex)")
 	return cmd
 }
