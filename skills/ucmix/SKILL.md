@@ -67,7 +67,7 @@ Common controls accept **human values** and the tool converts to the wire form:
 | `.../volume`, `.../aux{n}`, `.../FXA`..`FXH`, `.../limit/threshold` | dB, e.g. `-6dB` | |
 | `.../limit/release` | ms, e.g. `400` | |
 | `.../username` | a string, e.g. `"Vox Steve"` | |
-| `.../color` | hex, e.g. `4ed2ff` | |
+| `.../color` | hex, e.g. `4ed2ff` | reads back as 8 lowercase RGBA digits (`4ed2ffff`) |
 | `.../iconid` | an icon id, e.g. `vocals/leadvocals` | |
 | `.../adc_src` (input patch) | the input number, e.g. `5` | |
 

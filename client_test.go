@@ -1,9 +1,7 @@
 package ucmix
 
 import (
-	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"math"
 	"os"
@@ -319,8 +317,8 @@ func TestDeltaMergeAppliesPVPSPC(t *testing.T) {
 	if !ok {
 		t.Fatal("color missing")
 	}
-	if b, isBytes := raw.([]byte); !isBytes || len(b) != 4 || b[0] != 0x4e {
-		t.Errorf("color raw = %v, want []byte{4e d2 ff ff}", raw)
+	if raw != "4ed2ffff" {
+		t.Errorf("color raw = %v, want the canonical hex 4ed2ffff", raw)
 	}
 }
 
@@ -532,61 +530,53 @@ func TestSetDCAMasterVolumeRoundTrips(t *testing.T) {
 	}
 }
 
-func TestGetHumanizesColorFromSnapshot(t *testing.T) {
+// TestColorIsCanonicalFromSnapshot pins the snapshot half of issue #30: a ZB
+// stores the color ABGR-packed into an integer (the little-endian read of the
+// wire bytes 94 78 ce ff), and both readers must render the same canonical hex.
+func TestColorIsCanonicalFromSnapshot(t *testing.T) {
 	ft := newFakeTransport()
-	// A ZB stores color ABGR-packed into an integer: the little-endian read of the
-	// wire bytes 94 78 ce ff. Humanized read unpacks it back to the RGBA bytes,
-	// symmetric with the write (which parses "9478ce" into those bytes).
 	c := connectWithZB(t, ft, map[string]any{"line/ch1/color": int64(0xffce7894)})
 	v, ok := c.Get("line/ch1/color")
 	if !ok {
 		t.Fatal("color missing")
 	}
-	b, isBytes := v.([]byte)
-	if !isBytes {
-		t.Fatalf("Get(color) = %T (%v), want humanized []byte", v, v)
+	if v != "9478ceff" {
+		t.Errorf("Get(color) = %v, want 9478ceff (canonical RGBA hex)", v)
 	}
-	if got := hex.EncodeToString(b); got != "9478ceff" {
-		t.Errorf("Get(color) = %s, want 9478ceff (unpacked RGBA)", got)
+	// The raw read agrees: the packed integer never survives into the tree.
+	if rv, _ := c.GetRaw("line/ch1/color"); rv != "9478ceff" {
+		t.Errorf("GetRaw(color) = %v, want 9478ceff — raw and humanized must agree", rv)
 	}
-	// --raw keeps the packed integer.
-	if rv, _ := c.GetRaw("line/ch1/color"); rv != int64(0xffce7894) {
-		t.Errorf("GetRaw(color) = %v, want the packed int 0xffce7894", rv)
+	// And so does the snapshot the config diff reads.
+	if sv := c.Snapshot()["line/ch1/color"]; sv != "9478ceff" {
+		t.Errorf("Snapshot()[color] = %v, want 9478ceff", sv)
 	}
 }
 
-func TestGetHumanizesColorFromDelta(t *testing.T) {
+// TestColorIsCanonicalFromDelta pins the other half: a live PC delta carries the
+// raw RGBA bytes and must land in the tree as the same canonical hex a snapshot
+// would produce.
+func TestColorIsCanonicalFromDelta(t *testing.T) {
 	ft := newFakeTransport()
 	c := connectWithZB(t, ft, map[string]any{})
-	// A live PC delta already carries the RGBA bytes; Get passes them through.
 	ft.deliver(proto.Frame{Code: proto.CodePC, Payload: proto.MarshalPC("line/ch1/color", []byte{0x4e, 0xd2, 0xff, 0xff})})
 	waitFor(t, func() bool { _, ok := c.GetRaw("line/ch1/color"); return ok })
 	v, ok := c.Get("line/ch1/color")
 	if !ok {
 		t.Fatal("color missing")
 	}
-	b, _ := v.([]byte)
-	if got := hex.EncodeToString(b); got != "4ed2ffff" {
-		t.Errorf("Get(color) = %s, want 4ed2ffff (PC delta bytes pass through)", got)
+	if v != "4ed2ffff" {
+		t.Errorf("Get(color) = %v, want 4ed2ffff (canonical RGBA hex)", v)
 	}
-}
-
-func TestColorReadInvertsWritePacking(t *testing.T) {
-	// The write parses "9478ce" to the wire bytes below; a snapshot stores them
-	// little-endian packed. humanizeColor must invert the packing so a set value
-	// reads back identically (bug #14: read must round-trip the write).
-	wire := []byte{0x94, 0x78, 0xce, 0xff}
-	packed := int64(uint32(wire[0]) | uint32(wire[1])<<8 | uint32(wire[2])<<16 | uint32(wire[3])<<24)
-	got, ok := humanizeColor(packed).([]byte)
-	if !ok || !bytes.Equal(got, wire) {
-		t.Errorf("humanizeColor(packed) = % x, want % x", got, wire)
+	if sv := c.Snapshot()["line/ch1/color"]; sv != "4ed2ffff" {
+		t.Errorf("Snapshot()[color] = %v, want 4ed2ffff", sv)
 	}
 }
 
 // TestRealSnapshotColorHumanizes reads the captured 32R snapshot end to end
-// through the client and checks a known channel color humanizes to hex.
-// line/ch1 in the capture is 0x4ed2ffff (cyan); the read must return that, not
-// the raw packed integer (bug #14).
+// through the client and checks a known channel color reaches canonical hex.
+// line/ch1 in the capture is 4ed2ffff (cyan); the read must return that, not
+// the packed integer (bug #14, issue #30).
 func TestRealSnapshotColorHumanizes(t *testing.T) {
 	blob, err := os.ReadFile("internal/proto/testdata/real-snapshot-32r.zb")
 	if err != nil {
@@ -598,12 +588,8 @@ func TestRealSnapshotColorHumanizes(t *testing.T) {
 	if !ok {
 		t.Fatal("line/ch1/color missing from snapshot")
 	}
-	b, isBytes := v.([]byte)
-	if !isBytes {
-		t.Fatalf("Get(color) = %T (%v), want humanized []byte", v, v)
-	}
-	if got := hex.EncodeToString(b); got != "4ed2ffff" {
-		t.Errorf("Get(line/ch1/color) = %s, want 4ed2ffff", got)
+	if v != "4ed2ffff" {
+		t.Errorf("Get(line/ch1/color) = %v, want 4ed2ffff", v)
 	}
 }
 

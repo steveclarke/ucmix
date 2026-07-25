@@ -41,7 +41,7 @@ Value forms are marked:
 | Path | Form | Notes |
 |------|------|-------|
 | `username` | string | Channel name (scribble strip) |
-| `color` | hex | e.g. `4ed2ff` |
+| `color` | hex | write 6 or 8 digits (`4ed2ff`, `#4ed2ff80`); always reads back as 8 lowercase RGBA digits (`4ed2ffff`) |
 | `iconid` | string | e.g. `drums/drumset`, `vocals/leadvocals`, `guitars/bass` |
 | `48v` | on/off | Phantom power |
 | `mute` | on/off | |

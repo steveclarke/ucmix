@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 
+	"github.com/steveclarke/ucmix/internal/color"
 	"github.com/steveclarke/ucmix/internal/schema"
 )
 
@@ -284,18 +284,15 @@ func (c *compiler) hpf(path string, h HPF) error {
 	}
 }
 
-// color parses a hex RGB(A) string, appending the default opaque alpha when the
-// input is 6 hex digits. The wire value is the 8-digit RGBA string.
-func (c *compiler) color(path, hex string, n int) error {
-	h := strings.TrimPrefix(hex, "#")
-	if !hexColor.MatchString(h) {
-		return fmt.Errorf("boardconfig: channels.%d.color: %q is not 6 or 8 hex digits", n, hex)
+// color normalizes a hex RGB(A) string to the canonical 8-digit RGBA form. Both
+// the wire and human values are canonical, so a drift row prints the same
+// rendering on both sides no matter which form the config declared.
+func (c *compiler) color(path, hexColor string, n int) error {
+	h, ok := color.Canonical(hexColor)
+	if !ok {
+		return fmt.Errorf("boardconfig: channels.%d.color: %q is not 6 or 8 hex digits", n, hexColor)
 	}
-	if len(h) == 6 {
-		h += "ff"
-	}
-	h = strings.ToLower(h)
-	c.push(path, h, strings.ToLower(strings.TrimPrefix(hex, "#")))
+	c.push(path, h, h)
 	return nil
 }
 
@@ -315,8 +312,7 @@ func (c *compiler) resolveSend(key string) (int, error) {
 }
 
 var (
-	hexColor = regexp.MustCompile(`^[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`)
-	auxKey   = regexp.MustCompile(`^aux(\d+)$`)
+	auxKey = regexp.MustCompile(`^aux(\d+)$`)
 )
 
 // letterToNum maps a single FX letter A–H to 1–8.

@@ -102,3 +102,60 @@ func TestDiffBoolAndString(t *testing.T) {
 		t.Errorf("mismatches = %d, want 2", len(mis))
 	}
 }
+
+// TestDiffColorAcrossRepresentations is the issue #30 regression: a board
+// reports a color as the ABGR-packed integer 4288910991 while the config
+// declares it as hex 8f96a3. Every form of the same color must Diff clean, and
+// a genuinely different color must still drift.
+func TestDiffColorAcrossRepresentations(t *testing.T) {
+	desired, err := Compile(Config{
+		Version:  1,
+		Channels: map[int]Channel{19: {Color: strp("8f96a3")}},
+	})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	same := []struct {
+		name string
+		got  any
+	}{
+		{"packed int from a ZB snapshot", int64(4288910991)},
+		{"packed int as int", int(4288910991)},
+		{"packed int through a float", float64(4288910991)},
+		{"RGBA bytes from a PC delta", []byte{0x8f, 0x96, 0xa3, 0xff}},
+		{"canonical hex string", "8f96a3ff"},
+		{"6-digit hex string", "8f96a3"},
+		{"uppercase hex string", "8F96A3FF"},
+	}
+	for _, tc := range same {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := map[string]any{"line/ch19/color": tc.got}
+			if mis := Diff(desired, snap); len(mis) != 0 {
+				t.Errorf("mismatches = %+v, want none (%v is 8f96a3ff)", mis, tc.got)
+			}
+		})
+	}
+
+	// A different color still drifts, and both sides of the row are canonical.
+	snap := map[string]any{"line/ch19/color": int64(4278190335)} // ff0000ff
+	mis := Diff(desired, snap)
+	if len(mis) != 1 {
+		t.Fatalf("mismatches = %d, want 1", len(mis))
+	}
+	if mis[0].Want != "8f96a3ff" || mis[0].Got != "ff0000ff" {
+		t.Errorf("drift row = want %v got %v, want canonical 8f96a3ff / ff0000ff", mis[0].Want, mis[0].Got)
+	}
+}
+
+// TestDiffColorDoesNotPanicOnByteSnapshot pins that two []byte values never
+// reach the == comparison, which panics on uncomparable types.
+func TestDiffColorDoesNotPanicOnByteSnapshot(t *testing.T) {
+	desired := []Desired{{Path: "line/ch1/color", WireValue: []byte{1, 2, 3, 4}, HumanValue: "01020304"}}
+	snap := map[string]any{"line/ch1/color": []byte{1, 2, 3, 4}}
+	if mis := Diff(desired, snap); len(mis) != 0 {
+		t.Errorf("mismatches = %v, want none", mis)
+	}
+}
+
+func strp(s string) *string { return &s }

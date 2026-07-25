@@ -78,7 +78,7 @@ func newDumpCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&raw, "raw", false, "show raw wire values (skip humanizing)")
+	cmd.Flags().BoolVar(&raw, "raw", false, "show wire values (skip humanizing; colors stay canonical hex)")
 	cmd.Flags().BoolVar(&asConfig, "as-config", false, "print the board as a declarative YAML config")
 	return cmd
 }

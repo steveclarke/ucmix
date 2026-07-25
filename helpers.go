@@ -2,8 +2,9 @@ package ucmix
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
+
+	"github.com/steveclarke/ucmix/internal/color"
 )
 
 // ChannelType names a family of channels and maps to its wire path prefix.
@@ -45,14 +46,15 @@ func (c *Client) SetIcon(ctx context.Context, ct ChannelType, n int, icon string
 	return c.Set(ctx, ct.Path(n, "iconid"), icon)
 }
 
-// SetColor sets the channel color from an RGB hex string (e.g. "4ed2ff"). A
-// fully-opaque alpha byte (0xff) is appended, matching the board's PC format.
+// SetColor sets the channel color from an RGB(A) hex string (e.g. "4ed2ff" or
+// "4ed2ff80"). A 6-digit value gains the fully-opaque alpha byte (0xff),
+// matching the board's PC format.
 func (c *Client) SetColor(ctx context.Context, ct ChannelType, n int, rgbHex string) error {
-	rgb, err := hex.DecodeString(rgbHex)
+	rgba, err := color.Parse(rgbHex)
 	if err != nil {
-		return fmt.Errorf("ucmix: color %q is not hex: %w", rgbHex, err)
+		return fmt.Errorf("ucmix: %w", err)
 	}
-	return c.Set(ctx, ct.Path(n, "color"), append(rgb, 0xff))
+	return c.Set(ctx, ct.Path(n, "color"), rgba)
 }
 
 // Set48V toggles phantom power on channel n.

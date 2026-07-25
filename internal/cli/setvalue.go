@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/steveclarke/ucmix/internal/color"
 	"github.com/steveclarke/ucmix/internal/schema"
 )
 
@@ -40,11 +40,7 @@ func parseSetValue(spec schema.KeySpec, known bool, raw string) (any, error) {
 	case schema.KindString:
 		return unquote(raw), nil
 	case schema.KindChars:
-		b, err := parseColor(raw)
-		if err != nil {
-			return nil, err
-		}
-		return b, nil
+		return parseColor(raw)
 	default:
 		return nil, fmt.Errorf("unhandled key kind for value %q", raw)
 	}
@@ -97,23 +93,16 @@ func parseFloatWithUnit(raw string) (float64, bool) {
 	return 0, false
 }
 
-// parseColor decodes a hex color into wire bytes. A 3-byte RGB value gets a
-// fully-opaque 0xff alpha appended (the board's RGBA format); a 4-byte value is
-// taken as-is. A leading '#' is allowed.
-func parseColor(raw string) ([]byte, error) {
-	s := strings.TrimPrefix(strings.TrimSpace(raw), "#")
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		return nil, fmt.Errorf("color %q is not hex: %w", raw, err)
+// parseColor normalizes a hex color to the canonical 8-digit RGBA rendering — a
+// 6-digit RGB value gains the fully-opaque 0xff alpha, a leading '#' is dropped.
+// The canonical string is both what the write encodes to bytes and what the set
+// confirmation prints, so a color reads back exactly as it was written.
+func parseColor(raw string) (string, error) {
+	h, ok := color.Canonical(raw)
+	if !ok {
+		return "", fmt.Errorf("color %q must be 6 (RGB) or 8 (RGBA) hex digits", raw)
 	}
-	switch len(b) {
-	case 3:
-		return append(b, 0xff), nil
-	case 4:
-		return b, nil
-	default:
-		return nil, fmt.Errorf("color %q must be 6 (RGB) or 8 (RGBA) hex digits", raw)
-	}
+	return h, nil
 }
 
 // unquote strips one layer of matching surrounding single or double quotes.

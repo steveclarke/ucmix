@@ -62,6 +62,11 @@ plain text. Values use human units: `-6dB`, `100Hz`, `on`/`off`, a physical
 input number for `adc_src`, a hex string for `color`. Paths use slashes
 (`line/ch1/volume`) or dots (`line.ch1.volume`).
 
+A color is written as 6 or 8 hex digits, with or without a leading `#`, and is
+always **read back as 8 lowercase RGBA hex digits** (`4ed2ff` → `4ed2ffff`).
+That one rendering is what `get`, `dump`, `dump --as-config`, and `verify` all
+print, so a color compares equal to itself however it was written.
+
 ## Noun commands (channel / mix / send)
 
 For the common actions there are noun-grouped shortcuts — a thin veneer over

@@ -22,9 +22,12 @@ func TestParseSetValueKnownKeys(t *testing.T) {
 		{"hpf Hz", "line/ch1/filter/hpf", "100Hz", 100.0},
 		{"string name", "line/ch1/username", "Kick", "Kick"},
 		{"string quoted", "line/ch1/username", `"Kick Drum"`, "Kick Drum"},
-		{"color rgb gets alpha", "line/ch1/color", "4ed2ff", []byte{0x4e, 0xd2, 0xff, 0xff}},
-		{"color hash prefix", "line/ch1/color", "#4ed2ff", []byte{0x4e, 0xd2, 0xff, 0xff}},
-		{"color rgba kept", "line/ch1/color", "4ed2ff80", []byte{0x4e, 0xd2, 0xff, 0x80}},
+		// Colors parse to the canonical 8-digit RGBA hex — the one rendering
+		// ucmix writes, prints, and compares (issue #30).
+		{"color rgb gets alpha", "line/ch1/color", "4ed2ff", "4ed2ffff"},
+		{"color hash prefix", "line/ch1/color", "#4ed2ff", "4ed2ffff"},
+		{"color rgba kept", "line/ch1/color", "4ed2ff80", "4ed2ff80"},
+		{"color uppercase lowercases", "line/ch1/color", "4ED2FF", "4ed2ffff"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
