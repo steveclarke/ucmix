@@ -1,6 +1,8 @@
 package proto_test
 
 import (
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,31 +32,29 @@ func TestStorePresetMatchesCapture(t *testing.T) {
 	})
 
 	// UC Surface pretty-prints with a space after each colon; the board is
-	// whitespace-insensitive and ucmix emits compact JSON, so compare the decoded
-	// message rather than raw bytes.
-	wantMsg, err := proto.ParseJM(want)
-	if err != nil {
-		t.Fatalf("parsing captured request: %v", err)
+	// whitespace-insensitive and ucmix emits compact JSON. So compare every
+	// decoded field rather than raw bytes — dropping a fixed field like
+	// presetTarget must fail this test.
+	var wantFields, gotFields map[string]string
+	if err := json.Unmarshal(bodyOf(t, want), &wantFields); err != nil {
+		t.Fatalf("decoding captured request: %v", err)
 	}
-	gotMsg, err := proto.ParseJM(got)
-	if err != nil {
-		t.Fatalf("parsing built request: %v", err)
+	if err := json.Unmarshal(bodyOf(t, got), &gotFields); err != nil {
+		t.Fatalf("decoding built request: %v", err)
 	}
-	if gotMsg.ID != wantMsg.ID {
-		t.Errorf("id = %q, want %q", gotMsg.ID, wantMsg.ID)
+	if !maps.Equal(gotFields, wantFields) {
+		t.Errorf("store request fields differ\n got: %v\nwant: %v", gotFields, wantFields)
 	}
+}
 
-	wantAck, err := proto.UnmarshalPresetAck(wantMsg.Body)
+// bodyOf returns a JM payload's JSON body.
+func bodyOf(t *testing.T, payload []byte) []byte {
+	t.Helper()
+	m, err := proto.ParseJM(payload)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing JM: %v", err)
 	}
-	gotAck, err := proto.UnmarshalPresetAck(gotMsg.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotAck.PresetFile != wantAck.PresetFile {
-		t.Errorf("presetFile = %q, want %q", gotAck.PresetFile, wantAck.PresetFile)
-	}
+	return m.Body
 }
 
 // The board's real acknowledgment must parse into the fields StoreScene matches on.

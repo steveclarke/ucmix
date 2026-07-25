@@ -115,7 +115,7 @@ func newStoreCmd(g *globals) *cobra.Command {
 				}
 			}
 
-			var slot string
+			var slot, replaced string
 			if replace {
 				existing, err := c.ResolveScene(ctx, project.Name, name)
 				if err != nil {
@@ -125,6 +125,7 @@ func newStoreCmd(g *globals) *cobra.Command {
 					}
 				}
 				slot = existing.Name
+				replaced = existing.Title
 			} else {
 				slot, err = c.NextSceneSlot(ctx, project.Name, name)
 				if err != nil {
@@ -140,11 +141,22 @@ func newStoreCmd(g *globals) *cobra.Command {
 				return storeErr(err)
 			}
 			if g.json {
-				return printJSON(map[string]any{
+				out := map[string]any{
 					"action": "store", "project": project.Name, "scene": slot, "title": name, "ok": true,
-				})
+				}
+				if replace {
+					out["replaced"] = replaced
+				}
+				return printJSON(out)
 			}
-			fmt.Println(ui.Success(fmt.Sprintf("stored %s / %s", project.Title, name)))
+			// Name the slot that changed, not just the title. An overwrite is
+			// destructive and the operator needs to see which scene it landed on.
+			if replace {
+				fmt.Println(ui.Success(fmt.Sprintf("stored %s / %s, replacing %q in slot %s",
+					project.Title, name, replaced, slot)))
+			} else {
+				fmt.Println(ui.Success(fmt.Sprintf("stored %s / %s in slot %s", project.Title, name, slot)))
+			}
 			return nil
 		},
 	}
