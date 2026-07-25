@@ -21,7 +21,21 @@ import "encoding/binary"
 //	list scenes in project: resource "Listpresets/proj/<name>.proj",     arg ""
 //	list channel presets:   resource "Listpresets/channel",             arg "<category>"
 //
-// Observed on a 32R (v0.4.0) via a UC Surface packet capture.
+// The resource string is a 4-character verb followed by the path it acts on.
+// Two verbs are confirmed from capture:
+//
+//	"List" — enumerate the path; the board answers with the FD chunks above.
+//	"Rena" — rename the preset at the path to arg (the new display title).
+//
+// A rename therefore reuses this same payload with no wire changes:
+//
+//	rename a scene: resource "Renapresets/proj/<proj>/<scene>.scn", arg "<new title>"
+//
+// Other verbs (delete, copy) are presumed to exist but have not been observed;
+// do not guess them against a board holding real scenes.
+//
+// Observed on a 32R (v0.4.0) via UC Surface packet captures (list: 2026-07-24,
+// rename: 2026-07-25).
 
 // MarshalFR builds an FR request payload for resource and arg. Pass an empty arg
 // for project and scene listings.
@@ -36,3 +50,10 @@ func MarshalFR(id uint16, resource, arg string) []byte {
 	out = append(out, 0)
 	return out
 }
+
+// Preset-list and preset-mutation verbs for the FR resource string. Prefix a
+// path with one of these to build the resource.
+const (
+	VerbList = "List"
+	VerbRena = "Rena"
+)

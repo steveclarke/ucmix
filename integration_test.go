@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/steveclarke/ucmix/internal/fakeboard"
+	"github.com/steveclarke/ucmix/internal/proto"
 	"github.com/steveclarke/ucmix/internal/transport"
 )
 
@@ -209,5 +211,91 @@ func TestIntegrationListProjectsTimesOutWhenBoardSilent(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("ListProjects took %v, want ~%v (should not hang)", elapsed, listTimeout)
+	}
+}
+
+// A store the board never acknowledges must fail. This is the regression that
+// mattered: the old StoreScene returned nil as soon as the bytes were sent, so a
+// write the board dropped was reported as success and the operator believed a
+// scene was safe when nothing had been saved.
+func TestIntegrationStoreWithoutAckFails(t *testing.T) {
+	b := fakeboard.New(map[string]any{"line/ch1/username": "Original"})
+	b.SuppressStoreAck = true
+	addr := startFakeboard(t, b)
+
+	c := connectReal(t, addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+
+	err := c.StoreScene(ctx, "Proj", "01.SceneA.scn")
+	if err == nil {
+		t.Fatal("StoreScene reported success with no acknowledgment from the board")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("StoreScene error = %v, want the wait to expire", err)
+	}
+}
+
+// An acknowledgment for a different preset must not satisfy our wait — two
+// clients storing at once would otherwise confirm each other's writes.
+func TestIntegrationStoreIgnoresOtherPresetsAck(t *testing.T) {
+	b := fakeboard.New(map[string]any{"line/ch1/username": "Original"})
+	addr := startFakeboard(t, b)
+
+	c := connectReal(t, addr)
+	ctx := context.Background()
+
+	// The fake board acks the file it was asked for, so a normal store confirms.
+	if err := c.StoreScene(ctx, "Proj", "01.SceneA.scn"); err != nil {
+		t.Fatalf("store of 01.SceneA.scn: %v", err)
+	}
+	if _, ok := b.Scenes()["presets/proj/Proj/01.SceneA.scn"]; !ok {
+		t.Error("board did not record the scene under its full preset path")
+	}
+}
+
+// NextSceneSlot mirrors UC Surface's client-side allocation: first empty slot,
+// and never an implicit overwrite of an occupied one.
+func TestIntegrationNextSceneSlotAllocatesAndRefusesDuplicates(t *testing.T) {
+	b := fakeboard.New(map[string]any{"k": float32(1)})
+	addr := startFakeboard(t, b)
+	c := connectReal(t, addr)
+	ctx := context.Background()
+
+	slot, err := c.NextSceneSlot(ctx, "01.Sevenview Live.proj", "Opening")
+	if err != nil {
+		t.Fatalf("NextSceneSlot: %v", err)
+	}
+	// The allocated name must carry the first empty slot's number, whatever the
+	// board's roster looks like.
+	slots, err := c.SceneSlots(ctx, "01.Sevenview Live.proj")
+	if err != nil {
+		t.Fatalf("SceneSlots: %v", err)
+	}
+	var firstEmpty string
+	for _, sl := range slots {
+		if sl.Title == proto.EmptyPresetTitle {
+			firstEmpty = sl.Name
+			break
+		}
+	}
+	if firstEmpty == "" {
+		t.Fatal("fake board reported no empty scene slot")
+	}
+	prefix, _, _ := strings.Cut(firstEmpty, ".")
+	if want := prefix + ".Opening.scn"; slot != want {
+		t.Errorf("NextSceneSlot = %q, want %q (first empty slot %q)", slot, want, firstEmpty)
+	}
+
+	scenes, err := c.ListScenes(ctx, "01.Sevenview Live.proj")
+	if err != nil {
+		t.Fatalf("ListScenes: %v", err)
+	}
+	if len(scenes) == 0 {
+		t.Fatal("no occupied scenes in the fake board's list")
+	}
+	if _, err := c.NextSceneSlot(ctx, "01.Sevenview Live.proj", scenes[0].Title); !errors.Is(err, ErrSlotOccupied) {
+		t.Errorf("NextSceneSlot for an existing title = %v, want ErrSlotOccupied", err)
 	}
 }

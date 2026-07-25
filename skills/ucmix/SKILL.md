@@ -90,7 +90,11 @@ rather than trusting this list to be complete.
   for humans at a keyboard — an agent should keep using raw `get`/`set` below.
 - `dump [prefix]` — read every path (or those under a prefix); `--as-config` emits YAML
 - `verify <config.yml>` / `apply <config.yml>` — board as code: diff / write a whole config
-- `recall <project> <scene>` / `store <project> <scene>` — mixer scenes
+- `store <project> <name>` — store the current state as a new scene (`--replace` to
+  overwrite one); `recall <project> <scene>` — load a stored scene;
+  `rename <project> <scene> <new-name>` — retitle one. Project and scene arguments accept
+  either the display title (`"135 Main Live"`, `"Opening"`) or the board's slot name
+  (`"03.135 Main Live.proj"`, `"04.Opening.scn"`)
 - `reset` — factory reset (destructive; needs `--yes`)
 - `ls projects` — list projects on the board; `ls scenes <project>` — list a project's
   scenes. `<project>` is a name from `ls projects` (e.g. `01.Sevenview Live.proj`). Both
@@ -112,6 +116,30 @@ rather than trusting this list to be complete.
 - `reset` and `apply --reset` are destructive — only with `--yes` and a clear target.
 - Never assume a path exists; confirm with `dump <prefix>` or `get` on a real board.
 
+## Scenes — store, recall, rename
+
+`store` allocates the next free scene slot itself, the same way UC Surface does, and
+**refuses to overwrite** an existing scene of that name unless given `--replace`. A project
+holds 20 scene slots; `ErrNoFreeSlot` means they are all taken (delete one in UC Surface).
+
+`store` and `recall` wait for the board to confirm the operation and **fail if it never
+does** — a store that reports success really is on disk. This matters because the
+underlying request is fire-and-forget: earlier versions printed success as soon as the bytes
+were sent, and a scene the board dropped looked saved. If `store` errors, treat the scene as
+NOT stored.
+
+Because they wait on the board, both take a few seconds. That is the board committing to
+flash, not a hang.
+
+```bash
+ucmix store "135 Main Live" "Opening"                 # new scene, next free slot
+ucmix store "135 Main Live" "Opening" --replace        # overwrite it deliberately
+ucmix rename "135 Main Live" "Opening" "Opening Set"   # retitle, keeps its slot
+ucmix recall "135 Main Live" "Opening Set"
+```
+
+Deleting a scene is not supported — use UC Surface (the X on each row).
+
 ## Known limitations
 
 - `ls projects` / `ls scenes` list the board's presets over the FR/FD file-request
@@ -121,6 +149,9 @@ rather than trusting this list to be complete.
 - `apply` writes over one connection with a library commit barrier and verifies on a
   fresh connection (a fresh `get`). `set -f <file>` is the same batch write path without
   the verify.
+- `rename` is confirmed by re-listing the project, not by a board acknowledgment (the board
+  sends none for a rename). `reset` is still unconfirmed fire-and-forget — it reports that
+  the request was sent, not that the board acted on it.
 - HPF (Hz), limiter release curve, and reverb-type enums are not fully calibrated —
   their humanized conversions are approximate. Use raw values when exactness matters.
 - Some UCNET parameters have **no control in UC Surface** (e.g. an FX return's Main/LR

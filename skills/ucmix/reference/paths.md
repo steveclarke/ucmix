@@ -31,6 +31,7 @@ Value forms are marked:
 | `filtergroup/ch{n}` | 1–24 | DCA groups (one fader riding many channels) |
 | `mutegroup` | 1–8 | Mute groups |
 | `talkback`, `return` | — | Talkback and return channels |
+| `presets` | — | Loaded scene name/title and disk usage (read-only status) |
 | `global` | — | Mixer-wide: name, stagebox mode, pan/DCA mode |
 | `outputpatchrouter`, `stageboxsetup`, `networksetup` | — | Routing / hardware / network |
 

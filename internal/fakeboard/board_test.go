@@ -167,6 +167,19 @@ func TestStorePresetThenRestore(t *testing.T) {
 	// Store current state under a name.
 	c.send(t, proto.Frame{Code: proto.CodeJM, Payload: proto.MarshalJM(proto.StorePresetCmd{PresetFile: "scene-a"})})
 
+	// The board acknowledges the write; clients block on this before reporting
+	// success, so it must arrive before anything else is sent.
+	ack, err := c.readFrame(t, 2*time.Second)
+	if err != nil {
+		t.Fatalf("no ack after store: %v", err)
+	}
+	if ack.Code != proto.CodeJM {
+		t.Fatalf("ack code = %q, want JM", ack.Code)
+	}
+	if m, err := proto.ParseJM(ack.Payload); err != nil || m.ID != proto.JMStoredPreset {
+		t.Fatalf("ack id = %q (err %v), want StoredPreset", m.ID, err)
+	}
+
 	// Change the tree.
 	c.send(t, proto.Frame{Code: proto.CodePS, Payload: proto.MarshalPS("line/ch1/name", "Changed")})
 	// Give the board a moment to apply (single conn, no echo to read).
@@ -218,9 +231,19 @@ func TestListScenesFR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing FD reply: %v", err)
 	}
-	// Leading .cnfg entry + two scenes + one empty slot.
-	if len(files) != 4 || files[1].Title != "Opening Set" {
+	// Leading .cnfg entry, then the occupied scenes, then the empty slots that
+	// make slot allocation testable.
+	if len(files) < 4 || files[0].Title != "Main Live.cnfg" || files[1].Title != "Opening Set" {
 		t.Fatalf("scenes reply = %+v", files)
+	}
+	empties := 0
+	for _, f := range files {
+		if f.Title == proto.EmptyPresetTitle {
+			empties++
+		}
+	}
+	if empties == 0 {
+		t.Errorf("scenes reply has no empty slot: %+v", files)
 	}
 }
 

@@ -25,6 +25,11 @@ var ErrListTimeout = errors.New("ucmix: timed out waiting for the board's preset
 // buildPresetFile joins a project and scene into the preset-file path the board
 // keys scenes by. RecallScene and StoreScene must agree on this format so a
 // stored scene can be recalled by the same (project, scene) pair.
+//
+// project and scene must be the board's slot names, not display titles — they
+// carry a slot prefix and an extension ("03.135 Main Live.proj",
+// "04.Opening.scn"). A path built from bare titles is not a path the board
+// honors. ResolveProject and NextSceneSlot turn titles into slot names.
 func buildPresetFile(project, scene string) string {
 	if project == "" {
 		return "presets/proj/" + scene
@@ -32,15 +37,221 @@ func buildPresetFile(project, scene string) string {
 	return "presets/proj/" + project + "/" + scene
 }
 
-// RecallScene recalls a stored scene (JM RestorePreset). The board responds by
-// pushing a fresh ZB snapshot, which the merge loop loads.
+// presetAckTimeout bounds how long a preset command waits for the board's
+// acknowledgment. A real 32R answers a store in a few seconds. Package-level so
+// tests can shorten it; never reassigned outside tests.
+var presetAckTimeout = 10 * time.Second
+
+// ErrStoreTimeout is returned by StoreScene when the board never acknowledges
+// the write. The store must be treated as NOT having happened: the board sends
+// StoredPreset only once the scene is on disk.
+var ErrStoreTimeout = errors.New("ucmix: timed out waiting for the board to confirm the store")
+
+// ErrRecallTimeout is returned by RecallScene when the board never acknowledges
+// the recall.
+var ErrRecallTimeout = errors.New("ucmix: timed out waiting for the board to confirm the recall")
+
+// ErrSlotOccupied is returned when a store target names a slot that already
+// holds a scene. Overwriting is destructive and never implicit.
+var ErrSlotOccupied = errors.New("ucmix: that scene slot is already in use")
+
+// ErrNoFreeSlot is returned when a project has no empty scene slot left.
+var ErrNoFreeSlot = errors.New("ucmix: the project has no free scene slot")
+
+// RecallScene recalls a stored scene and waits for the board to confirm it (JM
+// RestorePreset out, JM RecalledPreset back). The board also pushes a fresh ZB
+// snapshot, which the merge loop loads.
+//
+// project and scene are slot names (see buildPresetFile). Returns
+// ErrRecallTimeout if no acknowledgment arrives; as with a store, the request
+// alone is fire-and-forget and a caller that hangs up first loses it.
 func (c *Client) RecallScene(ctx context.Context, project, scene string) error {
-	return c.sendJM(ctx, proto.RestorePresetCmd{PresetFile: buildPresetFile(project, scene)})
+	file := buildPresetFile(project, scene)
+	return c.presetCommand(ctx, file,
+		proto.RestorePresetCmd{PresetFile: file},
+		proto.JMRecalledPreset, ErrRecallTimeout)
 }
 
-// StoreScene stores the current mixer state as a scene (JM StorePreset).
+// StoreScene stores the current mixer state as a scene and waits for the board
+// to confirm it (JM StorePreset out, JM StoredPreset back).
+//
+// project and scene are slot names (see buildPresetFile). The wait is what makes
+// the store real: the request alone is fire-and-forget, and a caller that closes
+// the connection before the board finishes the write loses it. Returns
+// ErrStoreTimeout if no acknowledgment arrives — never report success without
+// one.
 func (c *Client) StoreScene(ctx context.Context, project, scene string) error {
-	return c.sendJM(ctx, proto.StorePresetCmd{PresetFile: buildPresetFile(project, scene)})
+	file := buildPresetFile(project, scene)
+	return c.presetCommand(ctx, file,
+		proto.StorePresetCmd{PresetFile: file},
+		proto.JMStoredPreset, ErrStoreTimeout)
+}
+
+// presetCommand sends a preset command and blocks until the board answers with
+// ackID for this exact presetFile. Matching on the file matters: the board
+// announces every client's preset writes on every connection, so an unmatched
+// ack would confirm somebody else's work.
+//
+// When the caller supplies no deadline, the wait is bounded and a expiry surfaces
+// as timeoutErr; a caller-driven cancel passes through unchanged.
+func (c *Client) presetCommand(ctx context.Context, presetFile string, cmd any, ackID string, timeoutErr error) error {
+	// Subscribe before sending so an ack cannot land before we are listening.
+	acks, unsubscribe := c.subscribeJM(8)
+	defer unsubscribe()
+
+	bounded := ctx
+	timed := false
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		bounded, cancel = context.WithTimeout(ctx, presetAckTimeout)
+		defer cancel()
+		timed = true
+	}
+
+	if err := c.sendJM(bounded, cmd); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case m := <-acks:
+			if m.ID != ackID {
+				continue
+			}
+			ack, err := proto.UnmarshalPresetAck(m.Body)
+			if err != nil {
+				continue
+			}
+			if ack.PresetFile == presetFile {
+				return nil
+			}
+		case <-bounded.Done():
+			if timed && ctx.Err() == nil {
+				return timeoutErr
+			}
+			return bounded.Err()
+		}
+	}
+}
+
+// RenameScene renames a stored scene's display title (FR with the Rena verb).
+// project and scene are slot names; title is the new display title. The board
+// sends no confirmation for a rename, so this re-lists the project and reports
+// an error if the new title is not present afterwards.
+//
+// The slot name keeps its original file name; only the title changes.
+func (c *Client) RenameScene(ctx context.Context, project, scene, title string) error {
+	resource := proto.VerbRena + buildPresetFile(project, scene)
+
+	c.mu.Lock()
+	c.nextReqID++
+	id := c.nextReqID
+	c.mu.Unlock()
+
+	req := proto.Frame{Code: proto.CodeFR, Payload: proto.MarshalFR(id, resource, title)}
+	if err := c.t.Send(ctx, req); err != nil {
+		return err
+	}
+
+	scenes, err := c.ListScenes(ctx, project)
+	if err != nil {
+		return fmt.Errorf("ucmix: renamed, but could not confirm it: %w", err)
+	}
+	for _, s := range scenes {
+		if s.Title == title {
+			return nil
+		}
+	}
+	return fmt.Errorf("ucmix: the board did not apply the rename to %q", title)
+}
+
+// ResolveProject turns a project title or slot name into the board's slot name.
+// An exact slot-name match wins; otherwise the display title is matched. This is
+// what lets a caller say "135 Main Live" instead of "03.135 Main Live.proj".
+func (c *Client) ResolveProject(ctx context.Context, project string) (Project, error) {
+	projects, err := c.ListProjects(ctx)
+	if err != nil {
+		return Project{}, err
+	}
+	for _, p := range projects {
+		if p.Name == project {
+			return p, nil
+		}
+	}
+	for _, p := range projects {
+		if p.Title == project {
+			return p, nil
+		}
+	}
+	return Project{}, fmt.Errorf("ucmix: no project named %q on the board", project)
+}
+
+// ResolveScene turns a scene title or slot name into the board's scene entry.
+// An exact slot-name match wins; otherwise the display title is matched.
+func (c *Client) ResolveScene(ctx context.Context, project, scene string) (Scene, error) {
+	scenes, err := c.ListScenes(ctx, project)
+	if err != nil {
+		return Scene{}, err
+	}
+	for _, s := range scenes {
+		if s.Name == scene {
+			return s, nil
+		}
+	}
+	for _, s := range scenes {
+		if s.Title == scene {
+			return s, nil
+		}
+	}
+	return Scene{}, fmt.Errorf("ucmix: no scene named %q in %s", scene, project)
+}
+
+// SceneSlots returns every scene slot in a project, occupied and empty alike, in
+// board order. ListScenes hides empty slots; slot allocation needs to see them.
+// The leading project-config entry is dropped.
+func (c *Client) SceneSlots(ctx context.Context, project string) ([]proto.PresetFile, error) {
+	files, err := c.listPresets(ctx, proto.VerbList+"presets/proj/"+project)
+	if err != nil {
+		return nil, err
+	}
+	slots := make([]proto.PresetFile, 0, len(files))
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name, ".scn") {
+			continue // the .cnfg project-config entry, not a scene slot
+		}
+		slots = append(slots, f)
+	}
+	return slots, nil
+}
+
+// NextSceneSlot builds the slot name a new scene called title should be stored
+// as: the first empty slot's number, then the title, then ".scn" — the same
+// allocation UC Surface performs client-side.
+//
+// It refuses when the project already holds a scene with that title, so a store
+// cannot silently overwrite one.
+func (c *Client) NextSceneSlot(ctx context.Context, project, title string) (string, error) {
+	slots, err := c.SceneSlots(ctx, project)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range slots {
+		if s.Title == title {
+			return "", fmt.Errorf("%w: %q already exists in this project", ErrSlotOccupied, title)
+		}
+	}
+	for _, s := range slots {
+		if s.Title != proto.EmptyPresetTitle {
+			continue
+		}
+		// Slot names are "NN.<title>.scn"; reuse the empty slot's NN prefix.
+		prefix, _, ok := strings.Cut(s.Name, ".")
+		if !ok {
+			continue
+		}
+		return prefix + "." + title + ".scn", nil
+	}
+	return "", ErrNoFreeSlot
 }
 
 // ResetScope selects what a ResetMixer clears. Scene clears scene-level
