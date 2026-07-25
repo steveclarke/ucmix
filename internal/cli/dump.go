@@ -55,7 +55,8 @@ func newDumpCmd(g *globals) *cobra.Command {
 				if raw {
 					values[p], _ = c.GetRaw(p)
 				} else {
-					values[p], _ = c.Get(p)
+					v, _ := c.Get(p)
+					values[p] = humanize(p, v)
 				}
 			}
 

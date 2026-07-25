@@ -18,15 +18,6 @@ type Mismatch struct {
 	Got  any
 }
 
-// tolerances by taper unit, in human units. Wire floats quantize, so tapered
-// comparisons use a per-unit band rather than exact equality.
-var tolerance = map[string]float64{
-	"dB":    0.5,
-	"Hz":    5,
-	"input": 0.5,
-	"ms":    5,
-}
-
 // floatEpsilon bounds equality for untapered raw floats (enum positions, raw
 // passthrough), which are compared directly rather than in human units.
 const floatEpsilon = 1e-6
@@ -68,7 +59,7 @@ func Diff(desired []Desired, snapshot map[string]any) []Mismatch {
 					scale = 1
 				}
 				gotH := spec.Taper.FromWire(gotRaw / scale)
-				if math.Abs(wantH-gotH) > tolerance[spec.Taper.Unit()] {
+				if math.Abs(wantH-gotH) > schema.Tolerance(spec.Taper.Unit()) {
 					out = append(out, Mismatch{Path: d.Path, Want: wantH, Got: gotH})
 				}
 				continue

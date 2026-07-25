@@ -99,16 +99,16 @@ func driftJSON(drift []boardconfig.Mismatch) []map[string]any {
 func renderDrift(drift []boardconfig.Mismatch) string {
 	rows := make([][2]string, len(drift))
 	for i, m := range drift {
-		rows[i] = [2]string{m.Path, fmt.Sprintf("want %s  got %s", displayValue(m.Want), gotOrAbsent(m.Got))}
+		rows[i] = [2]string{m.Path, fmt.Sprintf("want %s  got %s", displayValue(humanize(m.Path, m.Want)), gotOrAbsent(m.Path, m.Got))}
 	}
 	return ui.Table(rows)
 }
 
-func gotOrAbsent(v any) string {
+func gotOrAbsent(path string, v any) string {
 	if v == nil {
 		return "(absent)"
 	}
-	return displayValue(v)
+	return displayValue(humanize(path, v))
 }
 
 // verifyOnFreshConn opens a new connection, snapshots, and diffs — the required

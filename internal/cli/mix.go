@@ -66,6 +66,7 @@ func newMixCmd(g *globals) *cobra.Command {
 	// look like flags; take positionals verbatim and parse the limiter options
 	// by hand. Global flags still work before the positionals.
 	cmd.Flags().SetInterspersed(false)
+	addNoVerifyFlag(cmd, g)
 	return cmd
 }
 
@@ -108,13 +109,16 @@ func runMixLimiter(g *globals, cmd *cobra.Command, c *ucmix.Client, n int, rest 
 	for i, it := range items {
 		settings[i] = ucmix.Setting{Path: it.path, Value: it.value}
 	}
-	if err := c.SetMany(cmd.Context(), settings); err != nil {
+	werr := c.SetMany(cmd.Context(), settings)
+	// The read-back needs a fresh connection, so this one closes first.
+	_ = c.Close()
+	if werr != nil {
 		return errs.CLIError{
-			Message: fmt.Sprintf("could not write settings: %v", err),
+			Message: fmt.Sprintf("could not write settings: %v", werr),
 			Hint:    "check each value is in range for its control",
 		}
 	}
-	return reportSet(g, items)
+	return reportWrites(cmd.Context(), g, items)
 }
 
 // parseLimiterOpts reads the optional --threshold/--release pairs that follow

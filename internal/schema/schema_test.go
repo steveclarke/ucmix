@@ -249,3 +249,27 @@ func TestUnknownKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestTolerance covers the shared comparison band. It is one table because every
+// reader that compares a board value against a wanted one — config drift and the
+// post-write read-back — must agree on what "the same setting" means.
+func TestTolerance(t *testing.T) {
+	cases := []struct {
+		unit string
+		want float64
+	}{
+		{"dB", 0.5},
+		{"Hz", 5},
+		{"input", 0.5},
+		{"ms", 5},
+		{"unmapped", defaultTolerance},
+		{"", defaultTolerance},
+	}
+	for _, tc := range cases {
+		t.Run(tc.unit, func(t *testing.T) {
+			if got := Tolerance(tc.unit); got != tc.want {
+				t.Errorf("Tolerance(%q) = %v, want %v", tc.unit, got, tc.want)
+			}
+		})
+	}
+}

@@ -67,6 +67,19 @@ always **read back as 8 lowercase RGBA hex digits** (`4ed2ff` → `4ed2ffff`).
 That one rendering is what `get`, `dump`, `dump --as-config`, and `verify` all
 print, so a color compares equal to itself however it was written.
 
+Writes are read back. `set` and the noun commands re-read every path they wrote
+on a fresh connection and report what the board holds, so a value the mixer
+clamps or rejects is named rather than reported as a success:
+
+```
+✗ set line/ch3/filter/hpf: wrote 2000, board holds 1
+```
+
+That exits 1. The read-back costs one extra connection per command, not per
+write; `--no-verify` skips it and reports on send. Write commands take their
+values verbatim (so `-6dB` is not read as a flag), so `--no-verify` goes before
+the path — `ucmix set --no-verify line/ch1/mute on`.
+
 ## Noun commands (channel / mix / send)
 
 For the common actions there are noun-grouped shortcuts — a thin veneer over
@@ -81,7 +94,7 @@ ucmix channel 3 fader -6dB             # line/ch3/volume
 ucmix channel 3 mute on                # line/ch3/mute
 ucmix channel 3 color blue             # line/ch3/color     (name or hex)
 ucmix channel 3 icon drums             # line/ch3/iconid    (name or id)
-ucmix channel 3 hpf 100Hz              # line/ch3/filter/hpf
+ucmix channel 3 hpf 100Hz              # line/ch3/filter/hpf  (24 Hz - 1 kHz)
 
 ucmix mix 1 name "Steve"               # aux/ch1/username
 ucmix mix Steve fader -6dB             # a mix answers to its name or its number
@@ -138,7 +151,7 @@ channels:
     icon: drums/drumset
     patch: 1            # physical input
     phantom: true       # 48V
-    hpf: 80             # Hz
+    hpf: 80             # Hz, 24-1000 (or `off`)
     fader: -6           # dB
     main: true          # assign to main L/R
     sends:
@@ -194,11 +207,19 @@ commands.
 
 ## Calibration status
 
-The fader, limiter-threshold, and input-patch conversions are calibrated against
-a real StudioLive 32R. The high-pass-filter (0..1 → Hz), limiter-release, and
-reverb-type curves are not yet fully characterized — those fields round-trip on
-the wire but their human-unit conversions are provisional. A `raw:` escape hatch
-in the config accepts wire values directly for anything uncalibrated.
+The fader, limiter-threshold, input-patch, and high-pass-filter conversions are
+calibrated against a real StudioLive 32R. The high-pass sweeps 24 Hz to 1 kHz
+logarithmically, `pos = ln(Hz / 24) / ln(1000 / 24)`, with position 0 the bottom
+of the sweep and how the board stores a filter that is off.
+
+The limiter-release and reverb-type curves are not yet fully characterized —
+those fields round-trip on the wire but their human-unit conversions are
+provisional. A `raw:` escape hatch in the config accepts wire values directly for
+anything uncalibrated.
+
+Humanized reads round to one decimal. A wire position is a 32-bit float, so
+inverting one lands a hair off the number that was dialed; `get --raw` shows the
+exact position.
 
 ## Prior art
 

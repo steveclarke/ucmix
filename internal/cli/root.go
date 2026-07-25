@@ -41,6 +41,9 @@ type globals struct {
 	profile string
 	json    bool
 	noColor bool
+	// noVerify suppresses the post-write read-back. It is bound to --no-verify by
+	// the write commands only (see addNoVerifyFlag), not by the root.
+	noVerify bool
 }
 
 // dialClient resolves the mixer host (--host > --profile > UCMIX_HOST > current

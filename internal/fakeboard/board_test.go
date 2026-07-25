@@ -378,3 +378,43 @@ func waitFor(t *testing.T, cond func() bool) {
 		t.Fatal("condition not met within timeout")
 	}
 }
+
+// TestPVWriteClampsControlRange is the fidelity guard that lets the fake stand in
+// for a real desk on the write path: a 32R pins an out-of-range write to the end
+// of the control's travel and says nothing about it. A fake that stored 90.0 for
+// a 0..1 high-pass would let a unit-conversion bug pass every test and only
+// surface on hardware — which is how it surfaced the first time.
+func TestPVWriteClampsControlRange(t *testing.T) {
+	b := New(map[string]any{"line/ch3/filter/hpf": float32(0.0)})
+	addr := startBoard(t, b)
+
+	c := dial(t, addr)
+	c.subscribe(t)
+
+	cases := []struct {
+		name string
+		key  string
+		sent float32
+		want float32
+	}{
+		{"Hz sent to a 0..1 control pins at the top", "line/ch3/filter/hpf", 90, 1},
+		{"negative pins at the bottom", "line/ch3/volume", -3, 0},
+		{"in-range passes through", "line/ch3/volume", 0.746, 0.746},
+		// Unknown keys are not controls; the fake has no range to enforce.
+		{"unknown key passes through", "line/ch3/notacontrol", 90, 90},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c.send(t, proto.Frame{Code: proto.CodePV, Payload: proto.MarshalPV(tc.key, tc.sent)})
+			// The write lands through the board's reader goroutine, so a bare read
+			// straight after send races it.
+			waitFor(t, func() bool {
+				v, ok := b.Snapshot()[tc.key].(float32)
+				return ok && v == tc.want
+			})
+			if got := b.Snapshot()[tc.key]; got != any(tc.want) {
+				t.Errorf("%s = %v, want %v", tc.key, got, tc.want)
+			}
+		})
+	}
+}

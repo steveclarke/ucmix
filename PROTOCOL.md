@@ -125,7 +125,7 @@ Representative writable keys, all relative to a channel path such as `line/ch{N}
 | Label / name | `username` | string (PS) |
 | Icon | `iconid` | string (PS), e.g. `drums/drumset` |
 | 48V phantom | `48v` | bool (PV) |
-| High-pass filter | `filter/hpf` | float 0..1 (PV), `0` = off |
+| High-pass filter | `filter/hpf` | float 0..1 (PV), log over 24 Hz – 1 kHz; `0` = off |
 | Assign to Main LR | `lr` | bool (PV) |
 | Input patch | `adc_src` | float = input ÷ 32 (PV) |
 | Preamp gain | `preampgain` | float 0..1 (PV) |
@@ -166,8 +166,11 @@ Many parameters are normalized `0..1` floats that require conversion to reach hu
   `1.0 = 32/32` → input 32.
 - **Limiter release** (`limit/release`) — normalized; approximate mapping `0.5 ≈ 400 ms`.
   The full curve is **not yet fully characterized**.
-- **High-pass filter** (`filter/hpf`) — normalized `0..1`, `0` = off. The `0..1 → Hz`
-  taper is **not yet decoded**.
+- **High-pass filter** (`filter/hpf`) — normalized `0..1` over the board's 24 Hz – 1 kHz
+  sweep, logarithmically: `pos = ln(Hz / 24) / ln(1000 / 24)`, inverted as
+  `Hz = 24 · (1000/24)^pos`. Confirmed against a 32R: `0.35438603` = 90 Hz,
+  `0.13696200` = 40 Hz, `0.38263556` = 100 Hz. Position `0` is the bottom of the sweep
+  and is also how the board stores a filter that is off.
 - **Effects type** (`fx/ch{N}/type`) — a normalized enum; distinct algorithms map to
   distinct fractional values.
 

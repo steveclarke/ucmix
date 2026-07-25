@@ -72,7 +72,7 @@ Value forms are marked:
 ### Filter / dynamics / EQ (mostly raw)
 | Path | Form | Notes |
 |------|------|-------|
-| `filter/hpf` | Hz* | High-pass filter (*conversion approximate — use raw for exactness) |
+| `filter/hpf` | Hz | High-pass filter, 24 Hz – 1 kHz (`0` = off) |
 | `gate/on` | on/off | |
 | `gate/threshold`, `gate/range`, `gate/attack`, `gate/release`, `gate/ratio` | raw | Noise gate |
 | `comp/on` | on/off | |

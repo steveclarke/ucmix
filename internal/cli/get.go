@@ -34,6 +34,7 @@ func newGetCmd(g *globals) *cobra.Command {
 				value, ok = c.GetRaw(path)
 			} else {
 				value, ok = c.Get(path)
+				value = humanize(path, value)
 			}
 			if !ok {
 				return errs.CLIError{
