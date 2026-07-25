@@ -75,7 +75,8 @@ func newLsScenesCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "scenes <project>",
 		Short: "List scenes in a project on the mixer",
-		Args:  cobra.ExactArgs(1),
+		Args: requireArgs(cobra.ExactArgs(1), "ls scenes needs a project name",
+			"run `ucmix ls projects` to see them — quote names that contain spaces"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project := args[0]
 			c, err := g.dialClient(cmd.Context())

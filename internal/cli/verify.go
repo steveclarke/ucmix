@@ -19,7 +19,7 @@ func newVerifyCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "verify <config.yml>",
 		Short: "Check the board against a config (read-only; exit 1 on drift)",
-		Args:  cobra.ExactArgs(1),
+		Args:  requireArgs(cobra.ExactArgs(1), "verify needs a config file", ""),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			desired, err := loadAndCompile(args[0])
 			if err != nil {

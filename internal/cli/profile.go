@@ -46,7 +46,7 @@ func newProfileAddCmd(g *globals) *cobra.Command {
 		Long: "Add or update a saved profile.\n\n" +
 			"Example:\n  ucmix profile add foh --host 192.168.1.50\n" +
 			"  ucmix profile add monitor --host 192.168.1.51:53000 --use",
-		Args: cobra.ExactArgs(1),
+		Args: requireArgs(cobra.ExactArgs(1), "profile add needs a profile name", ""),
 		RunE: func(_ *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
 			if name == "" {
@@ -167,7 +167,8 @@ func newProfileUseCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "use <name>",
 		Short: "Set the current profile",
-		Args:  cobra.ExactArgs(1),
+		Args: requireArgs(cobra.ExactArgs(1), "profile use needs a profile name",
+			"run `ucmix profile ls` to see the profiles you have"),
 		RunE: func(_ *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
 			cfg, err := config.File{}.Load()
@@ -195,7 +196,7 @@ func newProfileShowCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show [name]",
 		Short: "Show a profile's host (defaults to current)",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  requireArgs(cobra.MaximumNArgs(1), "profile show takes at most one profile name", ""),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := config.File{}.Load()
 			if err != nil {
@@ -231,7 +232,8 @@ func newProfileRmCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "rm <name>",
 		Short: "Remove a profile",
-		Args:  cobra.ExactArgs(1),
+		Args: requireArgs(cobra.ExactArgs(1), "profile rm needs a profile name",
+			"run `ucmix profile ls` to see the profiles you have"),
 		RunE: func(_ *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
 			if err := (config.File{}.NewWriter()).RemoveProfile(name); err != nil {
@@ -248,7 +250,7 @@ func newProfileRenameCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "rename <old> <new>",
 		Short: "Rename a profile",
-		Args:  cobra.ExactArgs(2),
+		Args:  requireArgs(cobra.ExactArgs(2), "profile rename needs the current name and the new name", ""),
 		RunE: func(_ *cobra.Command, args []string) error {
 			old, newName := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
 			if newName == "" {

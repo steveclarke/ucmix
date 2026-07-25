@@ -52,7 +52,8 @@ func newChannelCmd(g *globals) *cobra.Command {
 		Use:   "channel <n> <verb> <value>",
 		Short: "Channel-strip shortcuts (name, fader, mute, …) over line/ch{n}",
 		Long:  channelHelp(),
-		Args:  cobra.MinimumNArgs(2),
+		Args: requireArgs(cobra.MinimumNArgs(2), "channel needs a channel number and a verb",
+			"run `ucmix channel --help` to see the verbs"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			n, err := parseIndex(args[0])
 			if err != nil {

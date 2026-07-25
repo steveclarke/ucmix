@@ -26,7 +26,8 @@ func newRecallCmd(g *globals) *cobra.Command {
 		Use:     "recall <project> <scene>",
 		Short:   "Recall a stored scene",
 		Example: `  ucmix recall "135 Main Live" "Opening"`,
-		Args:    cobra.ExactArgs(2),
+		Args: requireArgs(cobra.ExactArgs(2), "recall needs a project and a scene",
+			"run `ucmix ls projects`, then `ucmix ls scenes <project>` — quote names that contain spaces"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			projectArg, sceneArg := args[0], args[1]
@@ -97,7 +98,8 @@ func newStoreCmd(g *globals) *cobra.Command {
 		Short: "Store the current state as a scene",
 		Example: `  ucmix store "135 Main Live" "Opening"
   ucmix store "135 Main Live" "Opening" --replace`,
-		Args: cobra.ExactArgs(2),
+		Args: requireArgs(cobra.ExactArgs(2), "store needs a project and a name for the scene",
+			"run `ucmix ls projects` to see them — quote names that contain spaces"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			projectArg, name := args[0], args[1]
@@ -184,7 +186,8 @@ func newRenameCmd(g *globals) *cobra.Command {
 		Use:     "rename <project> <scene> <new-name>",
 		Short:   "Rename a stored scene",
 		Example: `  ucmix rename "135 Main Live" "Opening" "Opening Set"`,
-		Args:    cobra.ExactArgs(3),
+		Args: requireArgs(cobra.ExactArgs(3), "rename needs a project, a scene, and a new name",
+			"run `ucmix ls scenes <project>` to see them — quote names that contain spaces"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			projectArg, sceneArg, newName := args[0], args[1], args[2]
@@ -223,7 +226,8 @@ func newDeleteCmd(g *globals) *cobra.Command {
 		Use:     "delete <project> <scene>",
 		Short:   "Delete a stored scene (destructive)",
 		Example: `  ucmix delete "135 Main Live" "Soundcheck" --yes`,
-		Args:    cobra.ExactArgs(2),
+		Args: requireArgs(cobra.ExactArgs(2), "delete needs a project and a scene",
+			"run `ucmix ls scenes <project>` to see them — quote names that contain spaces"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			projectArg, sceneArg := args[0], args[1]

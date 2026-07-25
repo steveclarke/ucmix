@@ -30,7 +30,7 @@ func newApplyCmd(g *globals) *cobra.Command {
 		Example: `  ucmix apply board.yml
   ucmix apply board.yml --dry-run
   ucmix apply board.yml --reset --yes`,
-		Args: cobra.ExactArgs(1),
+		Args: requireArgs(cobra.ExactArgs(1), "apply needs a config file", ""),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			desired, err := loadAndCompile(args[0])
 			if err != nil {

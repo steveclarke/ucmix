@@ -18,7 +18,8 @@ func newGetCmd(g *globals) *cobra.Command {
 		Use:     "get <path>",
 		Short:   "Read one mixer value",
 		Example: "  ucmix get line/ch1/volume       # slashes or dots: line.ch1.volume also works",
-		Args:    cobra.ExactArgs(1),
+		Args: requireArgs(cobra.ExactArgs(1), "get needs a path",
+			"run `ucmix dump` to see the paths the board exposes"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := normalizePath(args[0])
 			c, err := g.dialClient(cmd.Context())
