@@ -309,10 +309,9 @@ func humanFloat(path string, val any) (float64, bool) {
 	return f / scale, true
 }
 
-// round1 rounds a humanized value to one decimal place. Taper inversion leaves
-// float noise (-6 dB reads back as -6.0000016); rounding keeps the dumped config
-// readable and stays far inside every Diff tolerance (dB 0.5, Hz 5, ms 5).
-func round1(f float64) float64 { return math.Round(f*10) / 10 }
+// round1 rounds a humanized value for the config file. The precision rule lives
+// in the schema so a dumped config and a `get` read agree.
+func round1(f float64) float64 { return schema.RoundHuman(f) }
 
 // levelFrom inverts a send/FX level. A wire 0.0 taper-inverts to the bottom dB
 // (the taper's floor), which Compile re-tapers back to 0.0 — so an off level
@@ -327,10 +326,9 @@ func levelFrom(path string, val any) Level {
 // hpfFrom inverts a high-pass value to Hz. Position 0 is the bottom of the
 // sweep, which is how the board stores a filter that is off.
 //
-// The frequency is rounded to a tenth of a Hz: a position read off the board is
-// a 32-bit float, so inverting it lands a hair off the round number a human
-// dialed (90.0 comes back as 89.99984). Well inside the Hz comparison band, and
-// what belongs in a config file is 90.
+// The frequency is rounded like every other humanized value (see round1): a
+// position read off the board is a 32-bit float, so inverting it lands a hair
+// off the round number a human dialed. What belongs in a config file is 90.
 func hpfFrom(val any) *HPF {
 	f, ok := asFloat(val)
 	if !ok {
@@ -339,7 +337,7 @@ func hpfFrom(val any) *HPF {
 	if f == 0 {
 		return &HPF{Off: true}
 	}
-	hz := math.Round(taper.HPF.FromWire(f)*10) / 10
+	hz := round1(taper.HPF.FromWire(f))
 	return &HPF{Hz: &hz}
 }
 

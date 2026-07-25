@@ -249,7 +249,7 @@ func printSetJSON(results []writeResult, missed int) error {
 func setJSONRow(r writeResult) map[string]any {
 	row := map[string]any{"path": r.path, "value": jsonValue(r.value), "ok": r.ok}
 	if r.verified {
-		row["got"] = jsonValue(r.got)
+		row["got"] = jsonValue(humanize(r.path, r.got))
 	}
 	return row
 }
@@ -286,5 +286,5 @@ func heldValue(r writeResult) string {
 	if !r.found {
 		return fmt.Sprintf("wrote %s, board holds nothing (path absent)", displayValue(r.value))
 	}
-	return fmt.Sprintf("wrote %s, board holds %s", displayValue(r.value), displayValue(r.got))
+	return fmt.Sprintf("wrote %s, board holds %s", displayValue(r.value), displayValue(humanize(r.path, r.got)))
 }

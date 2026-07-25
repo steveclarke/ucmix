@@ -25,9 +25,16 @@ import (
 // addNoVerifyFlag registers --no-verify on a write command. The read-back costs
 // one extra connection per command (not per write), so the escape hatch is for
 // callers that want the send and nothing else — a script driving many separate
-// invocations, or a board known to be slow to settle.
+// invocations, or a busy board where every extra connection competes with the
+// other clients on it.
+//
+// Every write command takes its positionals verbatim (a value like -6dB would
+// otherwise parse as a flag), so --no-verify has to come before them. The usage
+// string says so: trailing it lands as another positional and the error names
+// the argument count, not the flag.
 func addNoVerifyFlag(cmd *cobra.Command, g *globals) {
-	cmd.Flags().BoolVar(&g.noVerify, "no-verify", false, "report the write on send, without reading the value back")
+	cmd.Flags().BoolVar(&g.noVerify, "no-verify", false,
+		"report the write on send, without reading the value back (before the path/value)")
 }
 
 // reportWrites reads every write back (unless --no-verify) and reports what the

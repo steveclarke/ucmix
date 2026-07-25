@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // TestWriteLanded covers the comparison the post-write read-back turns on: a
 // value the board took versus one it clamped, rejected, or never had.
@@ -132,6 +135,12 @@ func TestHeldValueNamesBothValues(t *testing.T) {
 // the board doing that is the control working, not the write failing. Reported
 // against the raw written value instead, `set line/ch1/filter/hpf 0` — a filter
 // off — would read back as 24 Hz and be called a mismatch.
+//
+// Numbers compare within the control's tolerance, never exactly. A settled value
+// is a round trip through a logarithm or an interpolation, so the last bits
+// depend on the platform's libm: 90 Hz settles to 90.00000000000001 on
+// linux/amd64 and to 90 on darwin/arm64. Both are the same setting, which is
+// what the tolerance means.
 func TestSettledValue(t *testing.T) {
 	cases := []struct {
 		name string
@@ -155,8 +164,68 @@ func TestSettledValue(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := settledValue(tc.path, tc.want); got != tc.got {
+			got := settledValue(tc.path, tc.want)
+			if wf, ok := tc.got.(float64); ok {
+				gf, isFloat := got.(float64)
+				if !isFloat {
+					t.Fatalf("settledValue(%s, %v) = %v (%T), want a float", tc.path, tc.want, got, got)
+				}
+				if tol := writeTolerance(tc.path); math.Abs(gf-wf) > tol {
+					t.Errorf("settledValue(%s, %v) = %v, want %v (±%v)", tc.path, tc.want, gf, wf, tol)
+				}
+				return
+			}
+			if got != tc.got {
 				t.Errorf("settledValue(%s, %v) = %v, want %v", tc.path, tc.want, got, tc.got)
+			}
+		})
+	}
+}
+
+// TestSettledValueIsWhatTheReadBackCompares ties settledValue to the comparison
+// it feeds: a write that settles must land, whatever the platform's libm does to
+// the last bits, and a write the board pinned must not.
+func TestSettledValueIsWhatTheReadBackCompares(t *testing.T) {
+	const hpf = "line/ch3/filter/hpf"
+	// 90 Hz written, 90 Hz on the board (a 32-bit position inverted).
+	if !writeLanded(hpf, settledValue(hpf, 90.0), 90.00000306137774) {
+		t.Error("90 Hz written and held did not land")
+	}
+	// 0 Hz written — a filter off — settles at the bottom of the sweep.
+	if !writeLanded(hpf, settledValue(hpf, 0.0), 24.0) {
+		t.Error("hpf off did not land")
+	}
+	// The bug: Hz written straight through, board pinned to the top of the sweep.
+	if writeLanded(hpf, settledValue(hpf, 90.0), 1000.0) {
+		t.Error("a filter pinned to the top of its sweep counted as landed")
+	}
+}
+
+// TestHumanizeRoundsTaperedReads is the display rule: a read should look like the
+// value that was set. Inverting a 32-bit wire position leaves float noise whose
+// exact digits differ by platform, so tapered values round on the way out.
+func TestHumanizeRoundsTaperedReads(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		in   any
+		want any
+	}{
+		{"Hz noise rounds to the dialed value", "line/ch3/filter/hpf", 90.00000306137774, 90.0},
+		{"dB noise rounds to the dialed value", "line/ch1/volume", -6.000000847568462, -6.0},
+		{"a tenth is kept", "aux/ch1/volume", -31.749999, -31.7},
+		// A raw wire position has no human unit; rounding it to a tenth would
+		// destroy it.
+		{"untapered position is untouched", "line/ch1/pan", 0.3543863892555237, 0.3543863892555237},
+		{"unknown key is untouched", "some/new/key", 0.123456789, 0.123456789},
+		// Non-floats have nothing to round.
+		{"bool is untouched", "line/ch1/mute", true, true},
+		{"string is untouched", "line/ch1/username", "Kick", "Kick"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := humanize(tc.path, tc.in); got != tc.want {
+				t.Errorf("humanize(%s, %v) = %v, want %v", tc.path, tc.in, got, tc.want)
 			}
 		})
 	}

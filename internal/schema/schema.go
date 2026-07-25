@@ -14,6 +14,7 @@
 package schema
 
 import (
+	"math"
 	"regexp"
 	"strings"
 
@@ -325,6 +326,24 @@ func Tolerance(unit string) float64 {
 		return t
 	}
 	return defaultTolerance
+}
+
+// HumanPlaces is the decimal precision a humanized value is meaningful at.
+//
+// A wire position is a 32-bit float and the tapers are logarithms and
+// interpolations, so inverting a position lands a hair off the number a human
+// dialed: 90 Hz reads back as 90.00000306, -6 dB as -6.00000085, and the exact
+// noise differs by architecture. One decimal is far inside every comparison band
+// (see Tolerance) and is what makes a read look like the value that was set.
+//
+// This is a presentation rule. Client.Get returns the exact inverted value; the
+// CLI and the config writer round it.
+const HumanPlaces = 1
+
+// RoundHuman rounds a humanized value to HumanPlaces decimals.
+func RoundHuman(f float64) float64 {
+	p := math.Pow(10, HumanPlaces)
+	return math.Round(f*p) / p
 }
 
 // Lookup returns the KeySpec for a path and true if the path matches a known

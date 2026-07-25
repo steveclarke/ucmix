@@ -76,7 +76,9 @@ clamps or rejects is named rather than reported as a success:
 ```
 
 That exits 1. The read-back costs one extra connection per command, not per
-write; `--no-verify` skips it and reports on send.
+write; `--no-verify` skips it and reports on send. Write commands take their
+values verbatim (so `-6dB` is not read as a flag), so `--no-verify` goes before
+the path — `ucmix set --no-verify line/ch1/mute on`.
 
 ## Noun commands (channel / mix / send)
 
@@ -205,11 +207,19 @@ commands.
 
 ## Calibration status
 
-The fader, limiter-threshold, and input-patch conversions are calibrated against
-a real StudioLive 32R. The high-pass-filter (0..1 → Hz), limiter-release, and
-reverb-type curves are not yet fully characterized — those fields round-trip on
-the wire but their human-unit conversions are provisional. A `raw:` escape hatch
-in the config accepts wire values directly for anything uncalibrated.
+The fader, limiter-threshold, input-patch, and high-pass-filter conversions are
+calibrated against a real StudioLive 32R. The high-pass sweeps 24 Hz to 1 kHz
+logarithmically, `pos = ln(Hz / 24) / ln(1000 / 24)`, with position 0 the bottom
+of the sweep and how the board stores a filter that is off.
+
+The limiter-release and reverb-type curves are not yet fully characterized —
+those fields round-trip on the wire but their human-unit conversions are
+provisional. A `raw:` escape hatch in the config accepts wire values directly for
+anything uncalibrated.
+
+Humanized reads round to one decimal. A wire position is a 32-bit float, so
+inverting one lands a hair off the number that was dialed; `get --raw` shows the
+exact position.
 
 ## Prior art
 
