@@ -126,3 +126,38 @@ func TestHeldValueNamesBothValues(t *testing.T) {
 		t.Errorf("heldValue(absent) = %q, want %q", got, want)
 	}
 }
+
+// TestSettledValue covers the read-back comparing against what the control can
+// actually hold. A value past the end of a control's travel settles at the end;
+// the board doing that is the control working, not the write failing. Reported
+// against the raw written value instead, `set line/ch1/filter/hpf 0` — a filter
+// off — would read back as 24 Hz and be called a mismatch.
+func TestSettledValue(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want any
+		got  any
+	}{
+		{"hpf off settles at the bottom of the sweep", "line/ch3/filter/hpf", 0.0, 24.0},
+		{"hpf below the sweep settles at the bottom", "line/ch3/filter/hpf", 20.0, 24.0},
+		{"hpf in range is unchanged", "line/ch3/filter/hpf", 90.0, 90.0},
+		{"fader below the floor settles at the floor", "line/ch1/volume", -200.0, -84.0},
+		{"fader in range is unchanged", "line/ch1/volume", -6.0, -6.0},
+		// Above the top never reaches the board — Set errors first — so it is
+		// reported against what was asked for.
+		{"above the top is left alone", "line/ch3/filter/hpf", 2000.0, 2000.0},
+		// Untapered and non-float keys have no travel to settle into.
+		{"untapered float is unchanged", "line/ch1/pan", 5.0, 5.0},
+		{"bool is unchanged", "line/ch1/mute", true, true},
+		{"string is unchanged", "line/ch1/username", "Kick", "Kick"},
+		{"unknown key is unchanged", "some/new/key", 90.0, 90.0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := settledValue(tc.path, tc.want); got != tc.got {
+				t.Errorf("settledValue(%s, %v) = %v, want %v", tc.path, tc.want, got, tc.got)
+			}
+		})
+	}
+}

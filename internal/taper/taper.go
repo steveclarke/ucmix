@@ -96,13 +96,23 @@ var (
 		},
 	}
 
-	// HPF converts the high-pass filter (line/chN/filter/hpf) 0..1 <-> Hz. The
-	// curve is unknown, so this is a raw pass-through: the value is returned
-	// unchanged in both directions (0 = filter off; the config `raw:` escape
-	// hatch relies on this identity). The capture shows an active channel at
-	// 0.0598, so the true Hz mapping is still undecoded.
-	// TODO(phase2-hw): calibrate 0..1 -> Hz.
-	HPF Taper = passThroughTaper{}
+	// HPF converts the channel high-pass filter (line/chN/filter/hpf) in Hz to
+	// position. The board sweeps 24 Hz to 1 kHz logarithmically, so position is
+	// the log of the frequency over that span:
+	//
+	//	pos = ln(Hz / 24) / ln(1000 / 24)
+	//
+	// Confirmed against a 32R holding a configured show: 0.35438603 reads back
+	// 90.0 Hz, 0.13696200 reads 40.0 Hz, and 0.38263556 reads 100.0 Hz. Three
+	// independent positions landing on frequencies a human would dial is the
+	// calibration.
+	//
+	// Position 0 is the bottom of the sweep and is also how the board stores a
+	// filter that is off, so `off`, 0 Hz and `raw:0.0` name one state. A
+	// frequency below 24 Hz clamps there rather than erroring — the same
+	// bottom-clamp the level tapers use, and what `hpf: off` relies on to invert
+	// through FromWire and back.
+	HPF Taper = logTaper{unit: "Hz", min: 24, max: 1000}
 )
 
 // anchor is one (position, human-value) calibration point.
@@ -186,10 +196,36 @@ func (patchTaper) ToWire(input float64) (float64, error) {
 	return input / 32, nil
 }
 
-// passThroughTaper returns values unchanged in both directions. Used for HPF
-// until the 0..1 -> Hz curve is calibrated.
-type passThroughTaper struct{}
+// logTaper sweeps a control logarithmically from min to max across positions
+// 0..1 — the law a frequency control follows, where equal position steps are
+// equal musical intervals rather than equal Hz.
+type logTaper struct {
+	unit     string
+	min, max float64
+}
 
-func (passThroughTaper) Unit() string                          { return "Hz" }
-func (passThroughTaper) FromWire(pos float64) float64          { return pos }
-func (passThroughTaper) ToWire(human float64) (float64, error) { return human, nil }
+func (t logTaper) Unit() string { return t.unit }
+
+// FromWire clamps pos into 0..1 and returns the frequency at that position.
+func (t logTaper) FromWire(pos float64) float64 {
+	if pos <= 0 {
+		return t.min
+	}
+	if pos >= 1 {
+		return t.max
+	}
+	return t.min * math.Pow(t.max/t.min, pos)
+}
+
+// ToWire returns the position for a frequency. Values at or below the bottom of
+// the sweep clamp to position 0 (the control's off state); values above the top
+// return ErrOverRange.
+func (t logTaper) ToWire(human float64) (float64, error) {
+	if human <= t.min {
+		return 0, nil
+	}
+	if human > t.max {
+		return 0, fmt.Errorf("%w: %.4g %s > %.4g %s", ErrOverRange, human, t.unit, t.max, t.unit)
+	}
+	return math.Log(human/t.min) / math.Log(t.max/t.min), nil
+}

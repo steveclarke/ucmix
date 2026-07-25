@@ -8,6 +8,7 @@ import (
 
 	"github.com/steveclarke/ucmix/internal/color"
 	"github.com/steveclarke/ucmix/internal/schema"
+	"github.com/steveclarke/ucmix/internal/taper"
 )
 
 // ToConfig reconstructs a declarative [Config] from a raw wire snapshot — the
@@ -323,9 +324,13 @@ func levelFrom(path string, val any) Level {
 	return Level{Off: true}
 }
 
-// hpfFrom inverts a high-pass value. Exactly 0 is off; any other position is
-// emitted as a raw: escape hatch (the Hz curve is undecoded, so a raw position
-// is the only form that round-trips through the passthrough taper cleanly).
+// hpfFrom inverts a high-pass value to Hz. Position 0 is the bottom of the
+// sweep, which is how the board stores a filter that is off.
+//
+// The frequency is rounded to a tenth of a Hz: a position read off the board is
+// a 32-bit float, so inverting it lands a hair off the round number a human
+// dialed (90.0 comes back as 89.99984). Well inside the Hz comparison band, and
+// what belongs in a config file is 90.
 func hpfFrom(val any) *HPF {
 	f, ok := asFloat(val)
 	if !ok {
@@ -334,8 +339,8 @@ func hpfFrom(val any) *HPF {
 	if f == 0 {
 		return &HPF{Off: true}
 	}
-	r := f
-	return &HPF{Raw: &r}
+	hz := math.Round(taper.HPF.FromWire(f)*10) / 10
+	return &HPF{Hz: &hz}
 }
 
 // preFrom inverts the aux pre/post enum. Only calibrated positions map back to a

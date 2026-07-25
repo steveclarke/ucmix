@@ -1,6 +1,7 @@
 package boardconfig
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -156,5 +157,83 @@ func TestLoadInvalid(t *testing.T) {
 				t.Errorf("error = %q; want it to contain %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// TestHPFSpellings covers the three ways a config can name a filter that is off.
+// They were three behaviors before the sweep was calibrated: `off` was accepted,
+// `0` was rejected as an out-of-range frequency, and `raw:0.0` was what actually
+// reached the board. All three are position 0 now.
+func TestHPFSpellings(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{"off", "channels:\n  1:\n    hpf: off\n"},
+		{"zero Hz", "channels:\n  1:\n    hpf: 0\n"},
+		{"raw position", "channels:\n  1:\n    hpf: raw:0.0\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load([]byte(tc.yaml))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			desired, err := Compile(cfg)
+			if err != nil {
+				t.Fatalf("Compile: %v", err)
+			}
+			if len(desired) != 1 {
+				t.Fatalf("compiled %d settings, want 1", len(desired))
+			}
+			if got, ok := desired[0].WireValue.(float64); !ok || got != 0 {
+				t.Errorf("%s compiled to %v, want wire position 0", tc.name, desired[0].WireValue)
+			}
+		})
+	}
+}
+
+// TestHPFRangeIsTheBoardSweep checks the config validates against the board's
+// real 24 Hz – 1 kHz range rather than a generic audio band. A frequency the
+// board cannot reach has to be named at load time; letting it through only pins
+// the filter and reports success.
+func TestHPFRangeIsTheBoardSweep(t *testing.T) {
+	for _, hz := range []string{"20", "23", "1001", "20000"} {
+		t.Run(hz, func(t *testing.T) {
+			_, err := Load([]byte("channels:\n  1:\n    hpf: " + hz + "\n"))
+			if err == nil {
+				t.Fatalf("hpf: %s loaded, want an out-of-range error", hz)
+			}
+			if !strings.Contains(err.Error(), "24..1000") {
+				t.Errorf("error = %v, want it to name the 24..1000 range", err)
+			}
+		})
+	}
+	for _, hz := range []string{"24", "80", "90", "1000"} {
+		t.Run("accepts "+hz, func(t *testing.T) {
+			if _, err := Load([]byte("channels:\n  1:\n    hpf: " + hz + "\n")); err != nil {
+				t.Errorf("hpf: %s rejected: %v", hz, err)
+			}
+		})
+	}
+}
+
+// TestHPFCompilesHzToPosition is the bug in one assertion: a Hz value reaches the
+// board as a 0..1 position, not as the Hz number.
+func TestHPFCompilesHzToPosition(t *testing.T) {
+	cfg, err := Load([]byte("channels:\n  1:\n    hpf: 90\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	desired, err := Compile(cfg)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	got, ok := desired[0].WireValue.(float64)
+	if !ok {
+		t.Fatalf("wire value %v (%T), want a float position", desired[0].WireValue, desired[0].WireValue)
+	}
+	if math.Abs(got-0.35438603162765503) > 1e-5 {
+		t.Errorf("hpf 90 Hz compiled to %v, want ~0.354386 (the position a 32R holds for 90 Hz)", got)
 	}
 }

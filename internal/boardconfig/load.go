@@ -9,9 +9,8 @@ import (
 
 // Human-unit bounds used for early, field-named validation in [Load]. They
 // mirror the calibrated taper ranges (taper.Fader, taper.LimiterThresh,
-// taper.InputPatch); Compile also surfaces taper.ErrOverRange defensively, but
-// Load owns the clear messages. Hz bounds are a boardconfig-level sanity check —
-// the HPF taper is a passthrough stub and cannot range-check on its own.
+// taper.InputPatch, taper.HPF); Compile also surfaces taper.ErrOverRange
+// defensively, but Load owns the clear messages.
 const (
 	faderMinDB = -84.0
 	faderMaxDB = 10.0
@@ -19,8 +18,10 @@ const (
 	limitMaxDB = 0.0
 	patchMin   = 0
 	patchMax   = 32
-	hpfMinHz   = 20.0
-	hpfMaxHz   = 20000.0
+	// The board's high-pass sweeps 24 Hz to 1 kHz, per the UC Surface manual and
+	// confirmed against a 32R.
+	hpfMinHz = 24.0
+	hpfMaxHz = 1000.0
 )
 
 // Load parses and validates a declarative board config. Unknown fields are
@@ -81,8 +82,11 @@ func validateChannel(n int, ch Channel) error {
 		}
 	}
 	if ch.HPF != nil && ch.HPF.Hz != nil {
-		if hz := *ch.HPF.Hz; hz < hpfMinHz || hz > hpfMaxHz {
-			return fmt.Errorf("boardconfig: channels.%d.hpf: %g Hz out of range %g..%g", n, hz, hpfMinHz, hpfMaxHz)
+		// 0 is the bottom of the sweep, which is how the board stores a filter
+		// that is off — the same state as `off` and `raw:0.0`, so it is accepted
+		// rather than reported as an out-of-range frequency.
+		if hz := *ch.HPF.Hz; hz != 0 && (hz < hpfMinHz || hz > hpfMaxHz) {
+			return fmt.Errorf("boardconfig: channels.%d.hpf: %g Hz out of range %g..%g (or `off`)", n, hz, hpfMinHz, hpfMaxHz)
 		}
 	}
 	return nil

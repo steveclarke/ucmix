@@ -164,6 +164,9 @@ func TestToConfigLinkOnlyOnOddMaster(t *testing.T) {
 	}
 }
 
+// TestHPFInversion checks that a high-pass comes back as the frequency a human
+// would recognize, so `dump --as-config` produces a config apply and verify can
+// round-trip. The positions are read from a real 32R.
 func TestHPFInversion(t *testing.T) {
 	off, err := ToConfig(map[string]any{"line/ch1/filter/hpf": 0.0})
 	if err != nil {
@@ -172,9 +175,48 @@ func TestHPFInversion(t *testing.T) {
 	if h := off.Channels[1].HPF; h == nil || !h.Off {
 		t.Errorf("hpf 0.0 = %v, want off", h)
 	}
-	raw, _ := ToConfig(map[string]any{"line/ch1/filter/hpf": 0.06})
-	if h := raw.Channels[1].HPF; h == nil || h.Raw == nil || *h.Raw != 0.06 {
-		t.Errorf("hpf 0.06 = %v, want raw:0.06", h)
+
+	cases := []struct {
+		pos float64
+		hz  float64
+	}{
+		{0.35438603162765503, 90},
+		{0.13696199655532837, 40},
+		{0.38263556361198425, 100},
+		{1.0, 1000},
+	}
+	for _, tc := range cases {
+		cfg, err := ToConfig(map[string]any{"line/ch1/filter/hpf": tc.pos})
+		if err != nil {
+			t.Fatalf("ToConfig: %v", err)
+		}
+		h := cfg.Channels[1].HPF
+		if h == nil || h.Hz == nil {
+			t.Fatalf("hpf %v = %v, want Hz %v", tc.pos, h, tc.hz)
+		}
+		if *h.Hz != tc.hz {
+			t.Errorf("hpf %v = %v Hz, want %v", tc.pos, *h.Hz, tc.hz)
+		}
+	}
+}
+
+// TestHPFRoundTripsThroughCompile is the round-trip the issue asks for: a
+// position on the board inverts to Hz, and compiling that Hz back lands on the
+// same position, so a dumped config applies and verifies clean.
+func TestHPFRoundTripsThroughCompile(t *testing.T) {
+	for _, pos := range []float64{0.0, 0.13696199655532837, 0.35438603162765503, 0.38263556361198425, 1.0} {
+		cfg, err := ToConfig(map[string]any{"line/ch1/filter/hpf": pos})
+		if err != nil {
+			t.Fatalf("ToConfig: %v", err)
+		}
+		desired, err := Compile(cfg)
+		if err != nil {
+			t.Fatalf("Compile: %v", err)
+		}
+		drift := Diff(desired, map[string]any{"line/ch1/filter/hpf": pos})
+		if len(drift) != 0 {
+			t.Errorf("pos %v round-tripped with drift: %+v", pos, drift)
+		}
 	}
 }
 

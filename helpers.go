@@ -62,8 +62,10 @@ func (c *Client) Set48V(ctx context.Context, ct ChannelType, n int, on bool) err
 	return c.Set(ctx, ct.Path(n, "48v"), on)
 }
 
-// SetHPFHz sets the high-pass filter frequency. The HPF taper is an
-// uncalibrated pass-through in v1, so hz is sent as the raw 0..1 wire value.
+// SetHPFHz sets the high-pass filter frequency in Hz. The board sweeps 24 Hz to
+// 1 kHz logarithmically; hz is converted to the 0..1 wire position by taper.HPF.
+// A frequency at or below 24 Hz lands at the bottom of the sweep, which is how
+// the board stores a filter that is off; above 1 kHz returns taper.ErrOverRange.
 func (c *Client) SetHPFHz(ctx context.Context, ct ChannelType, n int, hz float64) error {
 	return c.Set(ctx, ct.Path(n, "filter/hpf"), hz)
 }

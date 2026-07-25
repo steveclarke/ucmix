@@ -33,6 +33,14 @@ func TestCalibrationPoints(t *testing.T) {
 		{"patch/32", InputPatch, 1.0, 32, 0.5 / 32, 0.5},
 		// Release stub: single known point 0.5 = 400 ms.
 		{"release/400ms", Release, 0.5, 400, 0.01, 5},
+		// HPF: three positions read off a 32R holding a configured show, each
+		// landing on a frequency a human would dial. The tolerances are tight on
+		// purpose — this is a closed-form curve, not an interpolation.
+		{"hpf/90Hz", HPF, 0.35438603162765503, 90, 1e-5, 0.01},
+		{"hpf/40Hz", HPF, 0.13696199655532837, 40, 1e-5, 0.01},
+		{"hpf/100Hz", HPF, 0.38263556361198425, 100, 1e-5, 0.01},
+		{"hpf/bottom", HPF, 0.0, 24, 1e-9, 1e-9},
+		{"hpf/top", HPF, 1.0, 1000, 1e-9, 1e-9},
 	}
 
 	for _, c := range cases {
@@ -76,6 +84,7 @@ func TestUnits(t *testing.T) {
 func TestMonotonic(t *testing.T) {
 	tapers := map[string]Taper{
 		"Fader":         Fader,
+		"HPF":           HPF,
 		"SendLevel":     SendLevel,
 		"LimiterThresh": LimiterThresh,
 	}
@@ -183,18 +192,51 @@ func TestFromWireClamp(t *testing.T) {
 	}
 }
 
-// TestHPFPassThrough documents the raw pass-through until the Hz curve lands.
-func TestHPFPassThrough(t *testing.T) {
-	for _, v := range []float64{0, 0.0598, 0.3826, 1.0} {
-		if got := HPF.FromWire(v); got != v {
-			t.Errorf("HPF.FromWire(%v) = %v, want unchanged", v, got)
-		}
-		got, err := HPF.ToWire(v)
+// TestHPFFormula checks the curve against the closed form the board follows,
+// independently of the anchor points in TestCalibrationPoints.
+func TestHPFFormula(t *testing.T) {
+	for _, hz := range []float64{24, 30, 40, 60, 80, 90, 100, 250, 500, 1000} {
+		want := math.Log(hz/24) / math.Log(1000.0/24)
+		got, err := HPF.ToWire(hz)
 		if err != nil {
-			t.Fatalf("HPF.ToWire(%v) error: %v", v, err)
+			t.Fatalf("HPF.ToWire(%v) error: %v", hz, err)
 		}
-		if got != v {
-			t.Errorf("HPF.ToWire(%v) = %v, want unchanged", v, got)
+		if math.Abs(got-want) > 1e-12 {
+			t.Errorf("HPF.ToWire(%v Hz) = %v, want %v", hz, got, want)
+		}
+	}
+}
+
+// TestHPFOffIsTheBottomOfTheSweep locks the reconciliation of the three
+// spellings the config accepts: `off`, 0 Hz and `raw:0.0` all name position 0.
+// The apply path relies on this — an off filter inverts through FromWire to
+// 24 Hz and must re-taper back to exactly 0.
+func TestHPFOffIsTheBottomOfTheSweep(t *testing.T) {
+	for _, hz := range []float64{0, 1, 20, 24, -5} {
+		pos, err := HPF.ToWire(hz)
+		if err != nil {
+			t.Fatalf("HPF.ToWire(%v) error: %v", hz, err)
+		}
+		if pos != 0 {
+			t.Errorf("HPF.ToWire(%v Hz) = %v, want 0 (bottom of the sweep = off)", hz, pos)
+		}
+	}
+	if got := HPF.FromWire(0); got != 24 {
+		t.Errorf("HPF.FromWire(0) = %v, want 24", got)
+	}
+	back, err := HPF.ToWire(HPF.FromWire(0))
+	if err != nil || back != 0 {
+		t.Errorf("off round-trip = %v (err %v), want 0", back, err)
+	}
+}
+
+// TestHPFAboveRange checks that a frequency past the top of the sweep errors
+// rather than silently pinning the filter wide open — the failure mode that made
+// this a bug on a live board.
+func TestHPFAboveRange(t *testing.T) {
+	for _, hz := range []float64{1001, 2000, 20000} {
+		if _, err := HPF.ToWire(hz); !errors.Is(err, ErrOverRange) {
+			t.Errorf("HPF.ToWire(%v) err = %v, want ErrOverRange", hz, err)
 		}
 	}
 }

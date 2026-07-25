@@ -158,7 +158,8 @@ is required when there is no terminal.
   sends none for a rename). `store`, `recall`, and `delete` all wait on a real one.
   `reset` is still unconfirmed fire-and-forget — it reports that the request was sent, not
   that the board acted on it.
-- HPF (Hz), limiter release curve, and reverb-type enums are not fully calibrated —
+- The high-pass filter is calibrated: Hz over the board's 24 Hz – 1 kHz sweep,
+  logarithmic, `0` = off. The limiter release curve and reverb-type enums are not —
   their humanized conversions are approximate. Use raw values when exactness matters.
 - Some UCNET parameters have **no control in UC Surface** (e.g. an FX return's Main/LR
   assign, `fxreturn/chN/lr`). Writing one leaves the board in a state the operator cannot

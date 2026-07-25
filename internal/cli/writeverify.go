@@ -122,10 +122,34 @@ func readBack(ctx context.Context, g *globals, items []setItem) ([]writeResult, 
 			got:      got,
 			found:    found,
 			verified: true,
-			ok:       found && writeLanded(it.path, it.value, got),
+			ok:       found && writeLanded(it.path, settledValue(it.path, it.value), got),
 		}
 	}
 	return out, nil
+}
+
+// settledValue is the value a written value becomes once the board holds it:
+// through the control's taper to a wire position and back. A control cannot hold
+// a value outside its own travel, and clamping to the end of it is the control
+// working, not the write failing — 0 Hz written to a filter that sweeps from
+// 24 Hz settles at 24 Hz (the bottom, which is also off), and -200 dB settles at
+// the bottom of the fader. Only the comparison uses this; the reported value
+// stays the one that was asked for.
+func settledValue(path string, want any) any {
+	spec, known := schema.Lookup(path)
+	if !known || spec.Kind != schema.KindFloat || spec.Taper == nil {
+		return want
+	}
+	f, ok := numeric(want)
+	if !ok {
+		return want
+	}
+	pos, err := spec.Taper.ToWire(f)
+	if err != nil {
+		// Out of range never reaches the board; report it against what was asked.
+		return want
+	}
+	return spec.Taper.FromWire(pos)
 }
 
 // allLanded reports whether every write in the set is on the board.
