@@ -69,8 +69,13 @@ func newLsProjectsCmd(g *globals) *cobra.Command {
 }
 
 // newLsScenesCmd builds `ls scenes <project>`: list the scenes stored in a
-// project. project is a project name from `ls projects` (e.g.
-// "01.Sevenview Live.proj").
+// project. project is either a display title ("135 Main Live") or the board's
+// slot name ("03.135 Main Live.proj"); both resolve to the same project.
+//
+// The argument is resolved before listing so a name the board does not know
+// fails as such. Listing an unknown project returns an empty result, which reads
+// as "this project has no scenes" — a plausible wrong answer that has already
+// cost a rollback point on a live rig.
 func newLsScenesCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "scenes <project>",
@@ -78,14 +83,24 @@ func newLsScenesCmd(g *globals) *cobra.Command {
 		Args: requireArgs(cobra.ExactArgs(1), "ls scenes needs a project name",
 			"run `ucmix ls projects` to see them — quote names that contain spaces"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project := args[0]
 			c, err := g.dialClient(cmd.Context())
 			if err != nil {
 				return err
 			}
 			defer func() { _ = c.Close() }()
 
-			scenes, err := c.ListScenes(cmd.Context(), project)
+			project, err := c.ResolveProject(cmd.Context(), args[0])
+			if errors.Is(err, ucmix.ErrListTimeout) {
+				return listErr("listing scenes failed", err)
+			}
+			if err != nil {
+				return errs.CLIError{
+					Message: fmt.Sprintf("listing scenes failed: %v", err),
+					Hint:    "run `ucmix ls projects` to see the projects on the board",
+				}
+			}
+
+			scenes, err := c.ListScenes(cmd.Context(), project.Name)
 			if err != nil {
 				return listErr("listing scenes failed", err)
 			}
@@ -95,9 +110,9 @@ func newLsScenesCmd(g *globals) *cobra.Command {
 			}
 
 			if g.json {
-				return printJSON(map[string]any{"project": project, "scenes": names})
+				return printJSON(map[string]any{"project": project.Name, "scenes": names})
 			}
-			printNames(names, "no scenes found")
+			printNames(names, fmt.Sprintf("%s has no scenes", project.Title))
 			return nil
 		},
 	}

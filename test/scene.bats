@@ -108,6 +108,20 @@ load test_helper
   [[ "$output" != *"Empty Location"* ]]
 }
 
+@test "ls scenes accepts a project's display title" {
+  run "${UCMIX_BIN}" ls scenes "Main Live"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Opening Set"* ]]
+}
+
+@test "ls scenes on an unknown project says so instead of listing nothing" {
+  run "${UCMIX_BIN}" ls scenes "Nonexistent Project"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no project named"* ]]
+  [[ "$output" == *"ucmix ls projects"* ]]
+  [[ "$output" != *"no scenes found"* ]]
+}
+
 @test "ls scenes --json is valid JSON" {
   run "${UCMIX_BIN}" ls scenes "01.Main Live.proj" --json
   [ "$status" -eq 0 ]
