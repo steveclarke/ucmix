@@ -150,7 +150,8 @@ ucmix filters set project inputpatching off
 The three groups are `scene` (the Scene Filter tiles), `advanced` (Advanced
 Scene Filter) and `project` (Project Filter). Tile names are the board's own key
 names, so a tile always names the parameter it writes; `-` and `_` are
-interchangeable.
+interchangeable. `filters set` is read back on a fresh connection like every
+other write, so it reports the value the board holds.
 
 ## Connecting to a mixer
 

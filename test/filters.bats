@@ -42,11 +42,12 @@ load test_helper
   [[ "$output" == *'"path": "global/fltr48v"'* ]]
 }
 
-@test "filters set includes a tile and it reads back" {
+# A filter is a write like any other, so it is read back on a fresh connection
+# and reported as what the board holds — not as what was sent.
+@test "filters set includes a tile and reports the read-back" {
   run "${UCMIX_BIN}" filters set scene 48v on
   [ "$status" -eq 0 ]
-  [[ "$output" == *"48v"* ]]
-  [[ "$output" == *"included"* ]]
+  [[ "$output" == *"set global/fltr48v = true"* ]]
 
   run "${UCMIX_BIN}" get global/fltr48v
   [ "$status" -eq 0 ]
@@ -56,7 +57,7 @@ load test_helper
 @test "filters set excludes a tile" {
   run "${UCMIX_BIN}" filters set scene mute off
   [ "$status" -eq 0 ]
-  [[ "$output" == *"excluded"* ]]
+  [[ "$output" == *"set global/fltrmute = false"* ]]
 
   run "${UCMIX_BIN}" get global/fltrmute
   [ "$status" -eq 0 ]
@@ -66,7 +67,13 @@ load test_helper
 @test "filters set accepts a dashed tile name" {
   run "${UCMIX_BIN}" filters set advanced dca-groups off
   [ "$status" -eq 0 ]
-  [[ "$output" == *"excluded"* ]]
+  [[ "$output" == *"advancedscenefilters/fltr_dca_groups = false"* ]]
+}
+
+@test "filters set --no-verify reports on send" {
+  run "${UCMIX_BIN}" filters set --no-verify scene 48v on
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"set global/fltr48v = true"* ]]
 }
 
 @test "filters set rejects an unknown tile" {
@@ -81,9 +88,10 @@ load test_helper
   [[ "$output" == *"on"* ]]
 }
 
-@test "filters set --json emits an envelope" {
-  run "${UCMIX_BIN}" filters set scene 48v off --json
+@test "filters set --json carries what the board holds" {
+  run "${UCMIX_BIN}" --json filters set scene 48v off
   [ "$status" -eq 0 ]
   echo "$output" | json_valid
-  [[ "$output" == *'"included": false'* ]]
+  [[ "$output" == *'"path": "global/fltr48v"'* ]]
+  [[ "$output" == *'"ok": true'* ]]
 }

@@ -113,7 +113,7 @@ func filterState(t ucmix.FilterTile) string {
 // newFiltersSetCmd builds `filters set <group> <tile> <on|off>`: include or
 // exclude one tile.
 func newFiltersSetCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "set <group> <tile> <on|off>",
 		Short: "Include or exclude one scope-filter tile",
 		Example: `  ucmix filters set scene 48v on
@@ -125,9 +125,7 @@ func newFiltersSetCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			tile := args[1]
-			included, ok := parseBool(args[2])
-			if !ok {
+			if _, ok := parseBool(args[2]); !ok {
 				return errs.CLIError{
 					Message: fmt.Sprintf("%q is not on or off", args[2]),
 					Hint:    "a tile is either included in a store/recall/reset (on) or excluded from it (off)",
@@ -135,7 +133,7 @@ func newFiltersSetCmd(g *globals) *cobra.Command {
 			}
 			// Resolve the tile before dialing, so a typo fails without touching
 			// the mixer and the error can name the tiles that do exist.
-			path, err := ucmix.FilterPath(group, tile)
+			path, err := ucmix.FilterPath(group, args[1])
 			if err != nil {
 				return errs.CLIError{
 					Message: err.Error(),
@@ -147,29 +145,18 @@ func newFiltersSetCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer func() { _ = c.Close() }()
-
-			if err := c.SetFilter(cmd.Context(), group, tile, included); err != nil {
-				return errs.CLIError{Message: fmt.Sprintf("setting the filter failed: %v", err)}
-			}
-			if g.json {
-				return printJSON(map[string]any{
-					"action": "filters set", "group": string(group), "tile": tile,
-					"path": path, "included": included, "ok": true,
-				})
-			}
-			fmt.Println(ui.Success(fmt.Sprintf("%s filter: %s %s", group, tile, filterVerb(included))))
-			return nil
+			// A filter is a write like any other: applyNoun sends it, then reads
+			// it back on a fresh connection and reports what the board holds. A
+			// tile this firmware does not carry reads back absent instead of
+			// reporting a success nobody confirmed.
+			return applyNoun(cmd.Context(), g, c, path, args[2])
 		},
 	}
-}
-
-// filterVerb describes the state a tile was just put in.
-func filterVerb(included bool) string {
-	if included {
-		return "included"
-	}
-	return "excluded"
+	// A tile value is a plain word, but keep the same positional handling every
+	// other write command uses so --no-verify lands before the arguments.
+	cmd.Flags().SetInterspersed(false)
+	addNoVerifyFlag(cmd, g)
+	return cmd
 }
 
 // parseFilterGroup resolves a group argument, case-insensitively.

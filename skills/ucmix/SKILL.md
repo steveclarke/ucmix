@@ -170,7 +170,8 @@ ucmix filters set project inputpatching off
 Groups: `scene` (Scene Filter, `global/fltr*`), `advanced` (Advanced Scene Filter,
 `advancedscenefilters/*`), `project` (Project Filter, `projectfilters/*`). Tile names are the
 board's own key names, so a tile names the parameter it writes; `-` and `_` are
-interchangeable.
+interchangeable. `filters set` reads the tile back on a fresh connection and reports what the
+board holds, the same as `set` and the noun verbs.
 
 A board ships with the scene filter's `48v` tile **excluded**, which is why recalling a scene
 leaves phantom power as it is. Changing a filter changes what every later store and recall
