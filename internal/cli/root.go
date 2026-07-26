@@ -101,6 +101,8 @@ func newRootCmd() *cobra.Command {
 		newDeleteCmd(g),
 		newResetCmd(g),
 		newLsCmd(g),
+		newProjectCmd(g),
+		newFiltersCmd(g),
 		newProfileCmd(g),
 		newConfigCmd(g),
 		newDiscoverCmd(g),

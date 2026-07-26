@@ -108,6 +108,50 @@ Run `ucmix channel --help` or `ucmix mix --help` for the full verb list. Color
 names (`blue`, `red`, `green`, …) and icon names (`drums`, `bass`, `vocal`)
 resolve to wire values; a hex color or a raw icon id still works.
 
+## Scenes, projects, and scope filters
+
+The mixer stores state in two layers. A **scene** is the mix — fat channel,
+mutes, mix levels, FX, DCA and mute groups. A **project** is the setup under it —
+input source and patching, AVB/SD/USB routing, flex mode, GEQ, solo. Scenes live
+inside a project.
+
+```sh
+ucmix ls projects                      # projects on the board
+ucmix ls scenes "135 Main Live"        # scenes in one project (title or slot name)
+ucmix project ls                       # projects, marking the loaded one
+
+ucmix store "135 Main Live" "Opening"  # store the current state as a new scene
+ucmix recall "135 Main Live" "Opening" # recall a stored scene
+ucmix rename "135 Main Live" "Opening" "Opening Set"
+ucmix delete "135 Main Live" "Soundcheck" --yes
+```
+
+`store` allocates the next free scene slot and refuses to overwrite an existing
+scene without `--replace`. `store`, `recall` and `delete` report success only
+after the board acknowledges the write.
+
+Storing and recalling a **project** as a unit is not implemented: the request UC
+Surface sends for it has not been captured, and the preset layer is not a place
+to guess.
+
+**Scope filters** decide what a store, recall or reset actually touches — the
+blue Project-Filter and Scene-Filter tiles in UC Surface. A tile is either
+included in the operation or excluded from it, and a board ships with the scene
+filter's `48v` tile excluded, which is why a scene recall leaves phantom power
+alone.
+
+```sh
+ucmix filters ls                       # every tile in every group
+ucmix filters ls scene                 # one group: scene, advanced, project
+ucmix filters set scene 48v on         # include phantom power in store/recall
+ucmix filters set project inputpatching off
+```
+
+The three groups are `scene` (the Scene Filter tiles), `advanced` (Advanced
+Scene Filter) and `project` (Project Filter). Tile names are the board's own key
+names, so a tile always names the parameter it writes; `-` and `_` are
+interchangeable.
+
 ## Connecting to a mixer
 
 ucmix resolves which mixer to talk to in this order: the `--host` flag, a named

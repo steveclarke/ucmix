@@ -124,6 +124,15 @@ var rows = []row{
 
 	// geq/chN — graphic EQ enable
 	{"geq/on", "geq/ch1/on", KindBool, false, "", 1},
+
+	// Scope-filter tiles — one row per tile, all plain on/off toggles.
+	{"scene filter/name", "global/fltrname", KindBool, false, "", 1},
+	{"scene filter/48v", "global/fltr48v", KindBool, false, "", 1},
+	{"scene filter/eqdynins", "global/fltreqdynins", KindBool, false, "", 1},
+	{"advanced scene filter/preamp", "advancedscenefilters/fltr_preamp", KindBool, false, "", 1},
+	{"advanced scene filter/mutes", "advancedscenefilters/fltr_mutes", KindBool, false, "", 1},
+	{"project filter/inputpatching", "projectfilters/fltr_inputpatching", KindBool, false, "", 1},
+	{"project filter/geq", "projectfilters/fltr_geq", KindBool, false, "", 1},
 }
 
 func TestLookupSeededKeys(t *testing.T) {
