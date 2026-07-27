@@ -295,6 +295,73 @@ The reassembled body is JSON:
 scene list also leads with the project's `.cnfg` config file. ucmix drops empty slots and
 the config entry, returning only occupied entries.
 
+## The project layer
+
+A project is a folder of scenes holding one project-layer file. Read off a 32R (firmware
+3.4.0), the scene listing for `03.135 Main Live.proj` leads with:
+
+```json
+{ "name": "135 Main Live.cnfg", "title": "135 Main Live.cnfg", "dir": false }
+```
+
+The `.cnfg` entry carries **no `NN.` slot prefix** — one per project, named after the
+project's title — where scenes are all `NN.<title>.scn`. Suffix, not slot position, is what
+distinguishes the layer file from a scene.
+
+The board states what it currently has loaded in four snapshot keys, as paths relative to
+its preset root:
+
+| Key | Value on the captured board |
+|-----|------------------------------|
+| `presets/loaded_project_name` | `proj/03.135 Main Live.proj` |
+| `presets/loaded_project_title` | `135 Main Live` |
+| `presets/loaded_scene_name` | `proj/03.135 Main Live.proj/01.Worship in the Park.scn` |
+| `presets/loaded_scene_title` | `Worship in the Park` |
+| `presets/isProjectLoaded` / `isSceneLoaded` | `1` |
+
+A preset-file path in a `JM` command is the same string with `presets/` prepended. Note that
+the project identity the board reports is the **`.proj` directory**, not the `.cnfg` file
+inside it.
+
+**Storing and recalling a project as a unit is undecoded.** No capture of UC Surface doing
+it exists, so which token a project-level `StorePreset`/`RestorePreset` carries — the
+`.proj` directory or the `.cnfg` file — is unestablished. The `loaded_project_name` evidence
+above points at the directory, but that is an inference from a read, not an observed
+request, and the format stays unencoded until a capture settles it.
+
+Two resources the board does **not** answer (no `FD`, no error — the request is dropped):
+
+- `Listpresets` — the preset root is not listable.
+- `Listpresets/proj/<project>/<file>.cnfg` — `List` applies to folders, not files.
+
+## Scope filters — what a Store, Recall or Reset touches
+
+The blue Project-Filter / Scene-Filter tiles are **not** a preset-layer format. Each tile is
+an ordinary parameter in the `ZB` snapshot: `1` = the setting travels with a
+store/recall/reset, `0` = it is left alone. Reading them is a snapshot read; setting one is
+a single `PV` write. Confirmed by reading all three groups off a 32R (firmware 3.4.0) and by
+flipping one tile and reading it back.
+
+| Group | Prefix | Tiles |
+|-------|--------|-------|
+| Scene Filter | `global/fltr` | `name`, `mute`, `fx`, `eqdynins`, `eqdynouts`, `aux`, `assign`, `preamps`, `fader`, `geq`, `dcagrp`, `48v`, `mutegroups`, `user`, `patch` |
+| Advanced Scene Filter | `advancedscenefilters/fltr_` | `channel_info`, `preamp`, `channelstrip`, `input_fatch`, `output_fatch`, `channel_delay`, `mutes`, `main_mix_level`, `main_mix_assigns`, `subgroup_assigns`, `aux_matrix_mixes`, `fx_mixes`, `fx_type`, `dca_groups`, `mute_groups` |
+| Project Filter | `projectfilters/fltr_` | `input_source`, `flexmixmode`, `flexmixprepostmode`, `fxmixpreposmode`, `talkbackassigns`, `solosettings`, `generalsettings`, `avbstreamrouting`, `inputpatching`, `outputpatching`, `avbpatching`, `sdpatching`, `usbpatching`, `geq`, `user_functions` |
+
+On the captured board every tile read `1` except `global/fltr48v`, which read `0` — the
+board's documented default of excluding phantom power from a scene recall, and the datum
+that identifies this key set as the Store/Recall/Reset filters rather than something else
+named `fltr`.
+
+A fourth, adjacent set governs channel **presets** and copy/paste rather than
+store/recall/reset, and is not wired to a command: `channelfilters/preset_*` and
+`channelfilters/paste_*` (plus `channelfilters/do_load` / `dont_load`). Unlike the three
+groups above, these are not uniformly on — e.g. `preset_48v` and `paste_48v` read `0` while
+`preset_eq` reads `1`.
+
+The `filtergroup/*` and `autofiltergroup/*` families are unrelated: those are the "filter
+DCA" buses, a different feature that shares the word.
+
 ## Gotchas
 
 - **Write pacing.** Sending several thousand writes in one burst drops the TCP connection

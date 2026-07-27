@@ -247,6 +247,69 @@ var specs = []KeySpec{
 	// geq/chN — graphic EQ. Only the enable toggle is decoded; the 31 band gains
 	// (gainN), source and ston stay raw.
 	{Pattern: "geq/ch{n}/on", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// --- scope-filter tiles — what a Store, Recall or Reset touches ---
+	//
+	// Three sets of on/off toggles, read live off a 32R (firmware 3.4.0): the
+	// Scene Filter tiles under global/fltr*, the Advanced Scene Filter tiles under
+	// advancedscenefilters/, and the Project Filter tiles under projectfilters/.
+	// 1 = the setting is included in a store/recall/reset, 0 = excluded. The board
+	// ships with global/fltr48v at 0, which is why a scene recall leaves phantom
+	// power alone.
+	//
+	// Enumerated one key at a time rather than by prefix so a future firmware key
+	// under the same prefix is an unknown pass-through, not a mis-modeled toggle.
+
+	// Scene Filter
+	{Pattern: "global/fltrname", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrmute", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrfx", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltreqdynins", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltreqdynouts", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltraux", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrassign", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrpreamps", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrfader", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrgeq", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrdcagrp", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltr48v", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrmutegroups", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltruser", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "global/fltrpatch", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// Advanced Scene Filter
+	{Pattern: "advancedscenefilters/fltr_channel_info", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_preamp", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_channelstrip", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_input_fatch", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_output_fatch", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_channel_delay", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_mutes", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_main_mix_level", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_main_mix_assigns", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_subgroup_assigns", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_aux_matrix_mixes", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_fx_mixes", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_fx_type", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_dca_groups", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "advancedscenefilters/fltr_mute_groups", Kind: KindBool, Writable: true, ReadScale: 1},
+
+	// Project Filter
+	{Pattern: "projectfilters/fltr_input_source", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_flexmixmode", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_flexmixprepostmode", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_fxmixpreposmode", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_talkbackassigns", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_solosettings", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_generalsettings", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_avbstreamrouting", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_inputpatching", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_outputpatching", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_avbpatching", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_sdpatching", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_usbpatching", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_geq", Kind: KindBool, Writable: true, ReadScale: 1},
+	{Pattern: "projectfilters/fltr_user_functions", Kind: KindBool, Writable: true, ReadScale: 1},
 }
 
 // compiled pairs each spec with its anchored regexp, built once at init.

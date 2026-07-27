@@ -101,6 +101,9 @@ rather than trusting this list to be complete.
 - `ls projects` — list projects on the board; `ls scenes <project>` — list a project's
   scenes. `<project>` is a name from `ls projects` (e.g. `01.Sevenview Live.proj`). Both
   take `--json`.
+- `project ls` — list projects with their titles, marking the one the board has loaded
+- `filters ls [scene|advanced|project]` / `filters set <group> <tile> <on|off>` — the scope
+  filters that decide what a store, recall or reset touches
 - `discover` / `setup` / `profile` / `config` — find/save/manage mixer connections
 
 ## Agent rules
@@ -145,6 +148,35 @@ ucmix delete "135 Main Live" "Opening Set" --yes      # destructive, frees the s
 it waits for the board to confirm. It prompts before acting; `--yes` skips the prompt and
 is required when there is no terminal.
 
+## The project layer and scope filters
+
+A **project** is the setup a scene sits on: input source and patching, AVB/SD/USB routing,
+flex mode, GEQ, solo. Scenes live inside a project. `project ls` lists the projects and marks
+the loaded one. Storing or recalling a project as a unit is **not implemented** — the request
+UC Surface sends for it has not been captured (issue #6), and `project store` / `project
+recall` fail with that explanation rather than guessing at the format.
+
+The **scope filters** are the blue tiles that decide what a store, recall or reset actually
+touches. Each tile is an ordinary parameter, so it reads through `get`/`dump` and writes
+through `set`; `filters` is the named surface over them.
+
+```bash
+ucmix filters ls                       # every tile in every group, with its state
+ucmix filters ls scene --json          # one group, machine-readable
+ucmix filters set scene 48v on         # include phantom power in a store/recall
+ucmix filters set project inputpatching off
+```
+
+Groups: `scene` (Scene Filter, `global/fltr*`), `advanced` (Advanced Scene Filter,
+`advancedscenefilters/*`), `project` (Project Filter, `projectfilters/*`). Tile names are the
+board's own key names, so a tile names the parameter it writes; `-` and `_` are
+interchangeable. `filters set` reads the tile back on a fresh connection and reports what the
+board holds, the same as `set` and the noun verbs.
+
+A board ships with the scene filter's `48v` tile **excluded**, which is why recalling a scene
+leaves phantom power as it is. Changing a filter changes what every later store and recall
+carries — it is a global setting, not a per-command flag.
+
 ## Known limitations
 
 - `ls projects` / `ls scenes` list the board's presets over the FR/FD file-request
@@ -158,6 +190,9 @@ is required when there is no terminal.
   sends none for a rename). `store`, `recall`, and `delete` all wait on a real one.
   `reset` is still unconfirmed fire-and-forget — it reports that the request was sent, not
   that the board acted on it.
+- Scope-filter reads are hardware-confirmed on a 32R (firmware 3.4.0), and the write path was
+  confirmed by flipping one tile and reading it back. A project store/recall has no captured
+  request and is not implemented.
 - The high-pass filter is calibrated: Hz over the board's 24 Hz – 1 kHz sweep,
   logarithmic, `0` = off. The limiter release curve and reverb-type enums are not —
   their humanized conversions are approximate. Use raw values when exactness matters.
