@@ -33,6 +33,7 @@ var DefaultConnID = [4]byte{0x68, 0x00, 0x65, 0x00}
 // Message codes (two ASCII chars each).
 var (
 	CodePV = [2]byte{'P', 'V'}
+	CodePE = [2]byte{'P', 'E'}
 	CodePS = [2]byte{'P', 'S'}
 	CodePC = [2]byte{'P', 'C'}
 	CodeZB = [2]byte{'Z', 'B'}
@@ -42,6 +43,7 @@ var (
 	CodeFR = [2]byte{'F', 'R'}
 	CodeFD = [2]byte{'F', 'D'}
 	CodeCK = [2]byte{'C', 'K'}
+	CodeUM = [2]byte{'U', 'M'}
 )
 
 // Frame is one UCNET packet, minus the fixed header and length field.
