@@ -25,6 +25,11 @@ The UDP source port in the announcement is dynamic and is not a TCP listener.
 The existing discovery parser accepts the announcement because it shares the
 UCNET header, but incorrectly presents every accepted device as a mixer.
 
+The capture established that bytes 4–5 of the `DA` announcement are the
+little-endian TCP control port. For the current session they decode to `49601`.
+Byte 8 supplies the server side of the UCNET connection identity. Both values
+must be read from each live announcement.
+
 These values are evidence from the current session, not permanent
 configuration. The PoC must identify the endpoint from its announcement rather
 than hard-code its IP address or source port.
@@ -33,7 +38,7 @@ than hard-code its IP address or source port.
 
 Use the working Studio Pro Remote app as the protocol reference:
 
-1. On the local gateway, capture only UDP packets involving the DAW host.
+1. Capture Studio Pro Remote traffic from the iPad's remote virtual interface.
 2. Connect Studio Pro Remote from the iPad.
 3. In the app, press Play, wait about one second, and press Stop.
 4. Separate discovery, connection setup, state updates, Play, and Stop by packet
@@ -43,10 +48,10 @@ Use the working Studio Pro Remote app as the protocol reference:
 6. Implement the minimum client that can reproduce the observed Play and Stop
    exchange.
 
-If the capture is encrypted or does not distinguish the commands, make one
-small active probe at a time against the advertised UDP endpoint. MIDI/MMC is a
-fallback for proving general remote control, but it does not satisfy this
-UCNET-specific proof.
+The captured control session is plain UCNET over TCP. It queries the user
+license, advertises a local UDP metering port, subscribes as `dawremote`, and
+uses a three-frame `PE`, `PV`, `PE` gesture for each transport action. Studio
+Pro confirms each action with matching `PV` transport state.
 
 ## Code Boundary
 
@@ -78,7 +83,9 @@ acknowledgment when none exists.
 - After Play, send Stop within one second even if normal verification fails.
 - Handle interruption by making a best-effort Stop before exit.
 - Reject non-DAW announcements and unexpected Studio Pro identities.
-- Do not send mixer `Subscribe`, `PV`, `PS`, or `PC` writes to the DAW.
+- Send `PV` only for the captured `transport/start` and `transport/stop`
+  gestures. Do not send mixer parameter paths, mixer subscription fields,
+  `PS`, or `PC` writes to the DAW.
 - Do not store a general network capture in the repository.
 
 ## Tests
@@ -86,7 +93,7 @@ acknowledgment when none exists.
 Implementation follows test-first development:
 
 1. A captured DAW announcement decodes to the observed device class, identity,
-   version label, display name, host, and dynamic UDP port.
+   version label, display name, host, TCP control port, and connection identity.
 2. Mixer and malformed announcements are rejected by DAW discovery.
 3. Captured Play and Stop messages decode to distinct transport actions.
 4. Encoding each supported action reproduces its sanitized captured fixture.
