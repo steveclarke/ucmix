@@ -19,15 +19,6 @@ import (
 	"github.com/steveclarke/ucmix/internal/dawschema"
 )
 
-// DefaultSocket is the per-user socket path (macOS gives each user a private
-// TMPDIR).
-func DefaultSocket() string {
-	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "ucdaw.sock")
-	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("ucdaw-%d.sock", os.Getuid()))
-}
-
 type wireRequest struct {
 	Request daw.Request `json:"request"`
 }
@@ -154,7 +145,12 @@ func (s *Server) Serve(ctx context.Context, socketPath string) error {
 			Hint:    "stop the other one first, or just use it",
 		}
 	}
-	_ = os.Remove(socketPath)
+	if err := ensurePrivateDir(filepath.Dir(socketPath)); err != nil {
+		return err
+	}
+	if err := clearStaleSocket(socketPath); err != nil {
+		return err
+	}
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("dawserve: listening on %s: %w", socketPath, err)
@@ -193,6 +189,10 @@ const maxRequest = 64 << 10
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
+	if err := checkPeer(conn); err != nil {
+		s.logf("refused a connection: %v", err)
+		return
+	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 4096), maxRequest)
 	encoder := json.NewEncoder(conn)
@@ -228,14 +228,18 @@ type Client struct {
 	Socket string
 }
 
-// Available reports whether a serve process answers on the socket.
+// Available reports whether a serve process run by this user answers on the
+// socket.
 func (c Client) Available() bool {
+	if c.Socket == "" {
+		return false
+	}
 	conn, err := net.DialTimeout("unix", c.Socket, 200*time.Millisecond)
 	if err != nil {
 		return false
 	}
-	_ = conn.Close()
-	return true
+	defer func() { _ = conn.Close() }()
+	return checkPeer(conn) == nil
 }
 
 // Do implements daw.Engine over the socket.
@@ -246,6 +250,9 @@ func (c Client) Do(ctx context.Context, req daw.Request) (daw.Result, error) {
 		return daw.Result{}, fmt.Errorf("dawserve: connecting to serve: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
+	if err := checkPeer(conn); err != nil {
+		return daw.Result{}, err
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}

@@ -155,6 +155,11 @@ func ckFrames(t *testing.T, body string, split int) []proto.Frame {
 
 func dialFake(t *testing.T, fake *fakeStudio) *Session {
 	t.Helper()
+	return dialFakeTap(t, fake, nil)
+}
+
+func dialFakeTap(t *testing.T, fake *fakeStudio, tap func(proto.Frame)) *Session {
+	t.Helper()
 	origDial, origListen, origSleep := dialTransport, listenMetering, sleepFor
 	t.Cleanup(func() { dialTransport, listenMetering, sleepFor = origDial, origListen, origSleep })
 	dialTransport = func(context.Context, string, transport.Options) (transport.Transport, error) {
@@ -164,7 +169,7 @@ func dialFake(t *testing.T, fake *fakeStudio) *Session {
 	sleepFor = func(context.Context, time.Duration) error { return nil }
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	s, err := Dial(ctx, Endpoint{IP: "127.0.0.1", ControlPort: 1, ServerID: 0x6a})
+	s, err := DialTap(ctx, Endpoint{IP: "127.0.0.1", ControlPort: 1, ServerID: 0x6a}, tap)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}

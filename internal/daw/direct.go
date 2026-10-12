@@ -28,9 +28,10 @@ var NotFound = Problem{
 }
 
 // Connect finds Studio Pro (the cached endpoint first, then discovery) and
-// opens a subscribed session. cacheFile may be empty to skip the cache.
-func Connect(ctx context.Context, cacheFile string) (*Session, error) {
-	if cached, ok := readEndpoint(cacheFile); ok {
+// opens a subscribed session. cacheFile may be empty to skip the cache. A
+// non-empty host pins Studio Pro to that IP for both the cache and discovery.
+func Connect(ctx context.Context, cacheFile, host string) (*Session, error) {
+	if cached, ok := readEndpoint(cacheFile); ok && (host == "" || cached.IP == host) {
 		dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		s, err := dialSession(dialCtx, cached)
 		cancel()
@@ -38,7 +39,7 @@ func Connect(ctx context.Context, cacheFile string) (*Session, error) {
 			return s, nil
 		}
 	}
-	endpoint, err := findStudioPro(ctx, discoveryWindow)
+	endpoint, err := findStudioPro(ctx, discoveryWindow, host)
 	if errors.Is(err, ErrNoStudioPro) {
 		return nil, NotFound
 	}
@@ -96,6 +97,7 @@ func writeEndpoint(path string, e Endpoint) {
 type Direct struct {
 	Schema    *dawschema.Catalog
 	CacheFile string
+	Host      string
 }
 
 // Do implements Engine.
@@ -103,7 +105,7 @@ func (d Direct) Do(ctx context.Context, req Request) (Result, error) {
 	if req.Op == "params" {
 		return Params(d.Schema, req.Filter), nil
 	}
-	s, err := Connect(ctx, d.CacheFile)
+	s, err := Connect(ctx, d.CacheFile, d.Host)
 	if err != nil {
 		return Result{}, err
 	}

@@ -50,3 +50,9 @@ An automatic review flagged unbounded allocation in `internal/daw/model.go` and 
 - `CK` reassembly: a session-side wrapper caps a blob at 16 MB (`MaxBlob`), rejects chunks that run past their declared total, and caps bytes held across chunks that never complete. The shared `proto.ChunkAssembler` is left untouched (mixer code path).
 - Model: at most 400,000 distinct paths (`MaxPaths`; the real model has about 156,000); new paths past that are dropped, existing ones still update. The change log was already a bounded ring.
 - One test per cap.
+
+## Security review 2: serve socket and discovery trust (23:50 NDT)
+
+- **Socket squatting.** The serve socket now lives in a private per-user directory (`~/Library/Caches/ucdaw/serve.sock` on macOS, `$XDG_RUNTIME_DIR/ucdaw/` on Linux), created 0700; an existing directory must be a real directory owned by the user (mode is tightened if loose). Serve removes a leftover path only if it is a socket owned by the user, and otherwise refuses. Both ends check peer credentials (`LOCAL_PEERCRED` on macOS, `SO_PEERCRED` on Linux): the CLI talks only to a server run by the same user, and the server drops clients of other users. Tests cover each check.
+- **Discovery trust.** My first fast path returned on the first Studio Pro announcement, which dropped the July "error on more than one" rule. Restored: discovery keeps listening 1.2 s after the first match (Studio Pro announces about once a second), so two instances still error. Kept: DAW class only, `.studioapp8` identity only, the mixer is never chosen, and the connect address is the announcement's UDP source, never a payload field. New: `--host <ip>` / `UCDAW_HOST` pins Studio Pro to one IP for discovery and the endpoint cache. Tests cover each rule.
+- Residual, accepted for a home network: an unpinned LAN host could still announce as Studio Pro; pinning closes that.

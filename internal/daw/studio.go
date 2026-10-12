@@ -82,6 +82,8 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return st.run(ctx, req.Category, req.Name)
 	case "params":
 		return Params(st.schema, req.Filter), nil
+	case "dump":
+		return st.dump(req.Filter), nil
 	}
 	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
 }
@@ -636,6 +638,36 @@ func (st *Studio) summarize(before []Channel, changes []string) string {
 		described = append(described[:4], fmt.Sprintf("and %d more", len(described)-4))
 	}
 	return strings.Join(described, ", ")
+}
+
+// Value is one live value in the model, formatted for reading.
+type Value struct {
+	Path  string `json:"path"`
+	Value string `json:"value"`
+}
+
+func (st *Studio) dump(prefix string) Result {
+	prefix = strings.Trim(prefix, "/")
+	var out []Value
+	for _, path := range st.model().Paths(prefix) {
+		v := Value{Path: path}
+		if p, ok := st.schema.Lookup(path); ok {
+			if p.Private() {
+				continue
+			}
+			v.Value = valuePart(func() string { d, _ := st.describe(p); return d }())
+		} else if s, ok := st.model().Str(path); ok {
+			v.Value = fmt.Sprintf("%q", s)
+		} else {
+			v.Value = trim(st.num(path))
+		}
+		out = append(out, v)
+	}
+	where := "in the song"
+	if prefix != "" {
+		where = fmt.Sprintf("under %s", prefix)
+	}
+	return Result{Message: fmt.Sprintf("%d live values %s.", len(out), where), Data: out}
 }
 
 // Params lists catalog entries, one per path pattern.

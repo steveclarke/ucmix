@@ -1,0 +1,498 @@
+// Package dawcli is the ucdaw command line: Studio Pro over UCNET, the way the
+// Studio Pro Remote app drives it.
+package dawcli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/steveclarke/ucmix/internal/daw"
+	"github.com/steveclarke/ucmix/internal/dawschema"
+	"github.com/steveclarke/ucmix/internal/dawserve"
+)
+
+type options struct {
+	json       bool
+	direct     bool
+	schemaPath string
+	socket     string
+	host       string
+}
+
+// Test seam: tests swap in an engine that never touches the network.
+var newEngine = func(o *options) (daw.Engine, error) {
+	client := dawserve.Client{Socket: o.socketPath()}
+	if !o.direct && client.Available() {
+		return client, nil
+	}
+	schema, err := loadSchema(o.schemaPath)
+	if err != nil {
+		return nil, err
+	}
+	return daw.Direct{Schema: schema, CacheFile: daw.DefaultCacheFile(), Host: o.host}, nil
+}
+
+// socketPath is --socket, or the private per-user default ("" if that
+// directory cannot be made safe, which disables serve).
+func (o *options) socketPath() string {
+	if o.socket != "" {
+		return o.socket
+	}
+	path, err := dawserve.DefaultSocket()
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+func loadSchema(path string) (*dawschema.Catalog, error) {
+	if path == "" {
+		path = os.Getenv("UCDAW_SCHEMA")
+	}
+	schema, err := dawschema.Load(path)
+	if err != nil {
+		return nil, daw.Problem{
+			Message: "Could not read Studio Pro's remote model (dawremote.xml).",
+			Hint:    "is Studio Pro 8 installed in /Applications? Otherwise point --schema or UCDAW_SCHEMA at the file",
+		}
+	}
+	return schema, nil
+}
+
+func newRootCmd() *cobra.Command {
+	o := &options{}
+	root := &cobra.Command{
+		Use:   "ucdaw",
+		Short: "Drive Fender Studio Pro over UCNET, like the Studio Pro Remote app",
+		Long: "ucdaw drives Fender Studio Pro 8 over UCNET, the protocol the Studio Pro Remote\n" +
+			"app uses. Every change is read back from Studio Pro before ucdaw reports it.\n" +
+			"Run `ucdaw serve` in the background for instant answers.\n\n" +
+			"Unofficial; not affiliated with or endorsed by Fender or PreSonus.",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	root.CompletionOptions.DisableDefaultCmd = true
+	flags := root.PersistentFlags()
+	flags.BoolVar(&o.json, "json", false, "print JSON")
+	flags.BoolVar(&o.direct, "direct", false, "connect to Studio Pro directly even when serve is running")
+	flags.StringVar(&o.schemaPath, "schema", "", "path to dawremote.xml (default: inside Studio Pro 8.app)")
+	flags.StringVar(&o.socket, "socket", "", "serve socket path (default: a private per-user directory)")
+	flags.StringVar(&o.host, "host", os.Getenv("UCDAW_HOST"), "only trust Studio Pro at this IP (or set UCDAW_HOST)")
+	root.AddCommand(
+		newDiscoverCmd(o),
+		newTransportCmd(o),
+		newClickCmd(o),
+		newTempoCmd(o),
+		newParamCmd(o),
+		newParamsCmd(o),
+		newStateCmd(o),
+		newCommandCmd(o),
+		newServeCmd(o),
+	)
+	return root
+}
+
+// run sends one request and prints the answer.
+func run(cmd *cobra.Command, o *options, req daw.Request) error {
+	engine, err := newEngine(o)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), daw.MaxPlay+30*time.Second)
+	defer cancel()
+	res, err := engine.Do(ctx, req)
+	if err != nil {
+		return err
+	}
+	return printResult(cmd.OutOrStdout(), o, res)
+}
+
+func printResult(w io.Writer, o *options, res daw.Result) error {
+	if o.json {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(res)
+	}
+	if _, err := fmt.Fprintln(w, res.Message); err != nil {
+		return err
+	}
+	return printRows(w, res.Data)
+}
+
+// printRows prints list results as aligned columns. Data that crossed the
+// serve socket arrives as generic JSON, so both typed and decoded forms are
+// handled by re-encoding into rows.
+func printRows(w io.Writer, data any) error {
+	raw, err := json.Marshal(data)
+	if err != nil || len(raw) == 0 || raw[0] != '[' {
+		return nil
+	}
+	var rows []map[string]any
+	if json.Unmarshal(raw, &rows) != nil || len(rows) == 0 {
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	for _, row := range rows {
+		switch {
+		case row["category"] != nil:
+			fmt.Fprintf(tw, "  %v\t%v\n", row["category"], row["name"])
+		case row["pattern"] != nil:
+			fmt.Fprintf(tw, "  %v\t%v\t%s\n", row["pattern"], row["type"], describeParam(row))
+		case row["value"] != nil:
+			fmt.Fprintf(tw, "  %v\t%v\n", row["path"], row["value"])
+		}
+	}
+	return tw.Flush()
+}
+
+func describeParam(row map[string]any) string {
+	var parts []string
+	switch row["type"] {
+	case "float", "int":
+		parts = append(parts, fmt.Sprintf("%v..%v", row["min"], row["max"]))
+	case "list":
+		if opts, ok := row["options"].([]any); ok {
+			var s []string
+			for _, o := range opts {
+				s = append(s, fmt.Sprint(o))
+			}
+			parts = append(parts, strings.Join(s, "|"))
+		}
+	}
+	if u, ok := row["units"].(string); ok && u != "" {
+		parts = append(parts, u)
+	}
+	if flags, ok := row["flags"].([]any); ok {
+		for _, f := range flags {
+			parts = append(parts, fmt.Sprint(f))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func newDiscoverCmd(o *options) *cobra.Command {
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "discover",
+		Short: "Find Studio Pro on the network",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			found, err := daw.Scan(cmd.Context(), timeout)
+			if err != nil {
+				return err
+			}
+			if o.json {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(found)
+			}
+			if len(found) == 0 {
+				return daw.NotFound
+			}
+			for _, e := range found {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s on %s (%s:%d)\n",
+					e.Product, strings.Fields(e.Version)[0], e.Name, e.IP, e.ControlPort)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().DurationVar(&timeout, "timeout", 3*time.Second, "how long to listen")
+	return cmd
+}
+
+func newTransportCmd(o *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "transport",
+		Short: "Play, stop, return to zero, loop",
+	}
+	var seconds time.Duration
+	var bars float64
+	play := &cobra.Command{
+		Use:   "play",
+		Short: "Start playback; with --for or --bars, stop again afterwards",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return run(cmd, o, daw.Request{Op: "transport", Action: "play", Seconds: seconds.Seconds(), Bars: bars})
+		},
+	}
+	play.Flags().DurationVar(&seconds, "for", 0, "play this long, then stop (max 60s)")
+	play.Flags().Float64Var(&bars, "bars", 0, "play this many bars at the song's tempo, then stop")
+	simple := func(use, short, action string) *cobra.Command {
+		return &cobra.Command{
+			Use:   use,
+			Short: short,
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				return run(cmd, o, daw.Request{Op: "transport", Action: action})
+			},
+		}
+	}
+	loop := &cobra.Command{
+		Use:       "loop [on|off]",
+		Short:     "Turn the loop on or off (toggle with no argument)",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"on", "off"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := daw.Request{Op: "transport", Action: "loop"}
+			if len(args) == 1 {
+				req.Value = args[0]
+			}
+			return run(cmd, o, req)
+		},
+	}
+	cmd.AddCommand(play, simple("stop", "Stop playback", "stop"),
+		simple("rtz", "Return to the start of the song", "rtz"), loop)
+	return cmd
+}
+
+func newClickCmd(o *options) *cobra.Command {
+	return &cobra.Command{
+		Use:       "click [on|off|toggle]",
+		Short:     "Turn the metronome click on or off (no argument: show it)",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"on", "off", "toggle"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			action := "status"
+			if len(args) == 1 {
+				action = args[0]
+			}
+			return run(cmd, o, daw.Request{Op: "click", Action: action})
+		},
+	}
+}
+
+func newTempoCmd(o *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "tempo [bpm]",
+		Short: "Show or set the song tempo",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := daw.Request{Op: "tempo"}
+			if len(args) == 1 {
+				bpm, err := strconv.ParseFloat(args[0], 64)
+				if err != nil || bpm <= 0 {
+					return daw.Problem{Message: fmt.Sprintf("tempo needs a number of bpm, not %q", args[0])}
+				}
+				req.BPM = bpm
+			}
+			return run(cmd, o, req)
+		},
+	}
+}
+
+func newParamCmd(o *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "param",
+		Short: "Read or write any Studio Pro parameter by path",
+	}
+	get := &cobra.Command{
+		Use:   "get <path>",
+		Short: "Read one parameter (e.g. transport/tempo)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(cmd, o, daw.Request{Op: "get", Path: args[0]})
+		},
+	}
+	set := &cobra.Command{
+		Use:   "set <path> <value>",
+		Short: "Write one parameter in its own units and confirm it (e.g. mixer/channel/ch1/mute on)",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(cmd, o, daw.Request{Op: "set", Path: args[0], Value: strings.Join(args[1:], " ")})
+		},
+	}
+	cmd.AddCommand(get, set)
+	return cmd
+}
+
+func newParamsCmd(o *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "params [filter]",
+		Short: "List the parameters Studio Pro exposes (from its dawremote.xml)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			schema, err := loadSchema(o.schemaPath)
+			if err != nil {
+				return err
+			}
+			filter := ""
+			if len(args) == 1 {
+				filter = args[0]
+			}
+			return printResult(cmd.OutOrStdout(), o, daw.Params(schema, filter))
+		},
+	}
+}
+
+func newStateCmd(o *options) *cobra.Command {
+	var values bool
+	cmd := &cobra.Command{
+		Use:   "state [path-prefix]",
+		Short: "Show the live song: tempo, click, tracks and plug-ins",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if values || len(args) == 1 {
+				prefix := ""
+				if len(args) == 1 {
+					prefix = args[0]
+				}
+				return run(cmd, o, daw.Request{Op: "dump", Filter: prefix})
+			}
+			return run(cmd, o, daw.Request{Op: "song"})
+		},
+	}
+	cmd.Flags().BoolVar(&values, "values", false, "list every live value instead of the summary")
+	cmd.AddCommand(newRecordCmd(o))
+	return cmd
+}
+
+func newRecordCmd(o *options) *cobra.Command {
+	var duration time.Duration
+	cmd := &cobra.Command{
+		Use:   "record <file>",
+		Short: "Record everything Studio Pro sends after subscribing (raw frames, for protocol work)",
+		Long: "Records raw UCNET frames to <file>. The capture holds licence and song data:\n" +
+			"keep it out of public repositories.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, err := os.Create(args[0])
+			if err != nil {
+				return err
+			}
+			defer func() { _ = f.Close() }()
+			endpoint, err := daw.FindStudioPro(cmd.Context(), 3*time.Second, o.host)
+			if errors.Is(err, daw.ErrNoStudioPro) {
+				return daw.NotFound
+			}
+			if err != nil {
+				return err
+			}
+			rec := daw.NewRecorder(f)
+			s, err := daw.DialTap(cmd.Context(), endpoint, rec.Tap)
+			if err != nil {
+				return err
+			}
+			select {
+			case <-time.After(duration):
+			case <-cmd.Context().Done():
+			case <-s.Done():
+			}
+			_ = s.Close()
+			if err := rec.Err(); err != nil {
+				return err
+			}
+			return printResult(cmd.OutOrStdout(), o, daw.Result{
+				Message: fmt.Sprintf("Recorded %d frames to %s.", rec.Frames, args[0]),
+				Data:    map[string]any{"frames": rec.Frames, "file": args[0]},
+			})
+		},
+	}
+	cmd.Flags().DurationVar(&duration, "for", 5*time.Second, "how long to record after subscribing")
+	return cmd
+}
+
+func newCommandCmd(o *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "command",
+		Short: "List and run Studio Pro's own commands (any menu or key command)",
+	}
+	list := &cobra.Command{
+		Use:   "list [filter]",
+		Short: "List the commands Studio Pro offers, by category",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := daw.Request{Op: "commands"}
+			if len(args) == 1 {
+				req.Filter = args[0]
+			}
+			return run(cmd, o, req)
+		},
+	}
+	runCmd := &cobra.Command{
+		Use:   "run <category> <name> | run \"<category> > <name>\" | run <unique name>",
+		Short: "Run a Studio Pro command and report what changed",
+		Example: "  ucdaw command run Track \"Add Audio Track (mono)\"\n" +
+			"  ucdaw command run \"Edit > Undo\"",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := daw.Request{Op: "run", Category: args[0]}
+			if len(args) == 2 {
+				req.Name = args[1]
+			}
+			return run(cmd, o, req)
+		},
+	}
+	cmd.AddCommand(list, runCmd)
+	return cmd
+}
+
+func newServeCmd(o *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "serve",
+		Short: "Hold one Studio Pro session open so every command answers instantly",
+		Long: "serve stays subscribed to Studio Pro, keeps the song model current from Studio\n" +
+			"Pro's own updates, and reconnects if Studio Pro restarts. Other ucdaw commands\n" +
+			"and `ucdaw mcp` use it automatically while it runs.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			schema, err := loadSchema(o.schemaPath)
+			if err != nil {
+				return err
+			}
+			logw := cmd.ErrOrStderr()
+			srv := &dawserve.Server{
+				Schema: schema,
+				Connect: func(ctx context.Context) (*daw.Session, error) {
+					return daw.Connect(ctx, daw.DefaultCacheFile(), o.host)
+				},
+				Log: func(format string, args ...any) {
+					fmt.Fprintf(logw, time.Now().Format("15:04:05")+" "+format+"\n", args...)
+				},
+			}
+			socket := o.socket
+			if socket == "" {
+				if socket, err = dawserve.DefaultSocket(); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintf(logw, "ucdaw serve listening on %s\n", socket)
+			return srv.Serve(cmd.Context(), socket)
+		},
+	}
+}
+
+// Execute runs the CLI and exits non-zero on failure.
+func Execute() {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	root := newRootCmd()
+	root.SetContext(ctx)
+	err := root.Execute()
+	cancel()
+	if err != nil {
+		printError(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func printError(w io.Writer, err error) {
+	var p daw.Problem
+	if errors.As(err, &p) {
+		fmt.Fprintln(w, p.Message)
+		if p.Hint != "" {
+			fmt.Fprintln(w, "  "+p.Hint)
+		}
+		return
+	}
+	fmt.Fprintln(w, "Error:", err)
+}

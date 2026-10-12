@@ -69,13 +69,22 @@ var listenAnnouncements = func() (net.PacketConn, error) {
 
 // Scan passively listens for DAW announcements for timeout.
 func Scan(ctx context.Context, timeout time.Duration) ([]Endpoint, error) {
-	return scan(ctx, timeout, false)
+	return scan(ctx, timeout, false, "")
 }
 
-// FindStudioPro listens until the first Studio Pro 8 announcement (they come
-// about once a second) or timeout, and returns that endpoint.
-func FindStudioPro(ctx context.Context, timeout time.Duration) (Endpoint, error) {
-	found, err := scan(ctx, timeout, true)
+// settleAfterFirst is how long FindStudioPro keeps listening after the first
+// Studio Pro announcement. Studio Pro announces about once a second, so a
+// second instance on the network is still heard and reported as ambiguous.
+var settleAfterFirst = 1200 * time.Millisecond
+
+// FindStudioPro listens for Studio Pro 8 announcements and returns the one
+// endpoint found. It stops shortly after the first match instead of waiting
+// out timeout, and still fails on zero or several. A non-empty host pins
+// discovery to that IP: announcements from any other address are ignored.
+// The endpoint's address is always the announcement's UDP source, never a
+// value from its payload.
+func FindStudioPro(ctx context.Context, timeout time.Duration, host string) (Endpoint, error) {
+	found, err := scan(ctx, timeout, true, host)
 	if err != nil {
 		return Endpoint{}, err
 	}
@@ -86,7 +95,7 @@ func isStudioPro(e Endpoint) bool {
 	return e.DeviceClass == "DAW" && strings.HasSuffix(e.Identity, ".studioapp8")
 }
 
-func scan(ctx context.Context, timeout time.Duration, first bool) ([]Endpoint, error) {
+func scan(ctx context.Context, timeout time.Duration, first bool, host string) ([]Endpoint, error) {
 	conn, err := listenAnnouncements()
 	if err != nil {
 		return nil, err
@@ -119,9 +128,15 @@ func scan(ctx context.Context, timeout time.Duration, first bool) ([]Endpoint, e
 			return nil, err
 		}
 		if endpoint, ok := parseAnnouncement(buffer[:n], addr); ok {
+			if host != "" && endpoint.IP != host {
+				continue
+			}
 			found[endpoint.Identity] = endpoint
 			if first && isStudioPro(endpoint) {
-				break
+				if settled := time.Now().Add(settleAfterFirst); settled.Before(deadline) {
+					deadline = settled
+				}
+				first = false
 			}
 		}
 	}

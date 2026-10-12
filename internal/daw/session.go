@@ -55,6 +55,8 @@ type Session struct {
 	metering net.PacketConn
 	model    *Model
 
+	tap func(proto.Frame)
+
 	done      chan struct{}
 	stop      chan struct{}
 	closeOnce sync.Once
@@ -64,6 +66,12 @@ type Session struct {
 // Dial connects to Studio Pro, subscribes as the Studio Pro Remote app, loads
 // the initial snapshot and keeps the model current until Close.
 func Dial(ctx context.Context, endpoint Endpoint) (*Session, error) {
+	return DialTap(ctx, endpoint, nil)
+}
+
+// DialTap is Dial with tap called on every inbound frame, from the first
+// licence reply on (for recording).
+func DialTap(ctx context.Context, endpoint Endpoint, tap func(proto.Frame)) (*Session, error) {
 	metering, err := listenMetering()
 	if err != nil {
 		return nil, fmt.Errorf("daw: opening UDP metering socket: %w", err)
@@ -82,6 +90,7 @@ func Dial(ctx context.Context, endpoint Endpoint) (*Session, error) {
 		t:        t,
 		metering: metering,
 		model:    NewModel(),
+		tap:      tap,
 		done:     make(chan struct{}),
 		stop:     make(chan struct{}),
 	}
@@ -178,6 +187,9 @@ func (s *Session) waitJM(ctx context.Context, id string) error {
 			}
 			if frame.Code == proto.CodeJM {
 				if msg, err := proto.ParseJM(frame.Payload); err == nil && msg.ID == id {
+					if s.tap != nil {
+						s.tap(frame)
+					}
 					return nil
 				}
 			}
@@ -189,6 +201,9 @@ func (s *Session) waitJM(ctx context.Context, id string) error {
 }
 
 func (s *Session) apply(pending *chunks, frame proto.Frame) {
+	if s.tap != nil {
+		s.tap(frame)
+	}
 	if frame.Code == proto.CodeCK {
 		chunk, err := proto.ParseCK(frame.Payload)
 		if err != nil {

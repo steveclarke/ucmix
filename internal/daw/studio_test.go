@@ -176,3 +176,21 @@ func TestSongSummaryEmpty(t *testing.T) {
 		t.Errorf("song = %q", got)
 	}
 }
+
+func TestDumpListsLiveValues(t *testing.T) {
+	st, _ := newStudio(t)
+	res, err := st.Do(context.Background(), Request{Op: "dump", Filter: "transport"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := res.Data.([]Value)
+	found := false
+	for _, v := range values {
+		if v.Path == "transport/tempo" && v.Value == "120 bpm" {
+			found = true
+		}
+	}
+	if !found || !strings.HasSuffix(res.Message, "under transport.") {
+		t.Errorf("dump = %q %+v", res.Message, values)
+	}
+}

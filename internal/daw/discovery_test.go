@@ -151,3 +151,52 @@ func TestScanDeduplicatesByIdentity(t *testing.T) {
 		t.Fatalf("Scan = %+v", got)
 	}
 }
+
+func useAnnouncements(t *testing.T, packets ...announcementPacket) {
+	t.Helper()
+	fake := &fakeAnnouncementConn{packets: packets}
+	original, settle := listenAnnouncements, settleAfterFirst
+	listenAnnouncements = func() (net.PacketConn, error) { return fake, nil }
+	settleAfterFirst = 20 * time.Millisecond
+	t.Cleanup(func() { listenAnnouncements, settleAfterFirst = original, settle })
+}
+
+func TestFindStudioProKeepsJulyRules(t *testing.T) {
+	a := &net.UDPAddr{IP: net.ParseIP("192.0.2.20"), Port: 62000}
+	b := &net.UDPAddr{IP: net.ParseIP("192.0.2.21"), Port: 62000}
+	t.Run("two Studio Pros is an error", func(t *testing.T) {
+		useAnnouncements(t,
+			announcementPacket{announcement("DAW", "one.studioapp8", 49601), a},
+			announcementPacket{announcement("DAW", "two.studioapp8", 49602), b},
+		)
+		if _, err := FindStudioPro(context.Background(), time.Second, ""); !errors.Is(err, ErrMultipleStudioPro) {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("mixer and other DAWs are never chosen", func(t *testing.T) {
+		useAnnouncements(t,
+			announcementPacket{announcement("Mixer", "board.serial", 53000), a},
+			announcementPacket{announcement("DAW", "other.studioapp7", 49601), a},
+		)
+		if _, err := FindStudioPro(context.Background(), 50*time.Millisecond, ""); !errors.Is(err, ErrNoStudioPro) {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("host pin ignores other addresses", func(t *testing.T) {
+		useAnnouncements(t,
+			announcementPacket{announcement("DAW", "spoof.studioapp8", 49601), b},
+			announcementPacket{announcement("DAW", "real.studioapp8", 49602), a},
+		)
+		got, err := FindStudioPro(context.Background(), time.Second, "192.0.2.20")
+		if err != nil || got.Identity != "real.studioapp8" {
+			t.Errorf("got %+v, %v", got, err)
+		}
+	})
+	t.Run("address comes from the UDP source", func(t *testing.T) {
+		useAnnouncements(t, announcementPacket{announcement("DAW", "x.studioapp8", 49601), a})
+		got, err := FindStudioPro(context.Background(), time.Second, "")
+		if err != nil || got.IP != "192.0.2.20" || got.ControlPort != 49601 {
+			t.Errorf("got %+v, %v", got, err)
+		}
+	})
+}
