@@ -372,3 +372,9 @@ SAY  Everything is set up except the clean guitar sound. Guitar Rig 7 is on the 
 
 - Run 2's result is left in the throwaway song for Steve to see. The "Mojito" instrument and a "Bridge" marker at bar 1 in that song are leftovers of the night's tests.
 - After the scene, `fader Pad --down 3` then `Edit / Undo`: Undo reported no change and the fader stayed at −3 dB (round 1 saw a fader change undone). Some Undo presses act on steps the remote cannot see (selection, arm), so "undo that" after a fader move is not reliable; setting the old level back is. Open question, logged.
+
+## Hand-back checks
+
+- `section play "Chorus 1" --for 1` live: "From Chorus: Played 1 s at 72 bpm, then stopped." Plain "Chorus" with two choruses answers "The song has 2 "Chorus" sections. say which: Chorus 1 (bar 9) or Chorus 2 (bar 25)".
+- Files Studio Pro wrote because of the tests: `Bounces/Track 1.wav` and `Bounces/Take.wav` (plus a peak cache file) in the throwaway song's folder, from the two `Event / Bounce Selection` runs; listed in the Hugo round 2 note. Studio Pro's own autosaves (`History/`) also continued as usual.
+- `just test`: 739 tests pass; `golangci-lint`: 0 issues on the ucdaw packages.
