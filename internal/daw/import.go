@@ -317,11 +317,13 @@ func (st *Studio) answerImportDialog(ctx context.Context, d Dialog) (string, err
 // audio, at most 3 minutes.
 func landingTimeout(f AudioFile) time.Duration {
 	bytes := float64(f.Frames) * float64(f.Channels) * float64(f.Bits) / 8
-	t := 15*time.Second + time.Duration(bytes/20e6*float64(time.Second))
-	if t > 3*time.Minute {
-		t = 3 * time.Minute
+	// Capped as a float: a header can claim 2^64 frames, and converting that
+	// to a time.Duration overflows.
+	seconds := 15 + bytes/20e6
+	if !(seconds <= 180) {
+		return 3 * time.Minute
 	}
-	return t
+	return time.Duration(seconds * float64(time.Second))
 }
 
 // peakDir is the open song's waveform cache, when the song lives where

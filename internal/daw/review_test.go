@@ -2,6 +2,7 @@ package daw
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -100,5 +101,56 @@ func TestUnchangedValuesAreNotChanges(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(m.Paths(""), ","), "a") {
 		t.Error("value lost")
+	}
+}
+
+// A play length is checked as a float before it becomes a time.Duration:
+// converting 1e300 seconds overflows on amd64 (to a negative Duration that
+// slips under MaxPlay) and saturates on arm64 (to a bogus 2562047h).
+func TestPlayRejectsLengthsThatOverflow(t *testing.T) {
+	tests := []struct {
+		v    float64
+		want string
+	}{
+		{math.Inf(1), "that is longer than the 1m0s limit for a timed play"},
+		{1e300, "that is longer than the 1m0s limit for a timed play"},
+		{1e19, "that is longer than the 1m0s limit for a timed play"},
+		{MaxPlay.Seconds() + 0.5, "longer than the 1m0s limit for a timed play"},
+		{math.Inf(-1), "a play length must be a positive number of seconds or bars"},
+		{math.NaN(), "a play length must be a positive number of seconds or bars"},
+		{-1, "a play length must be a positive number of seconds or bars"},
+	}
+	for _, tt := range tests {
+		for _, req := range []Request{
+			{Op: "transport", Action: "play", Seconds: tt.v},
+			{Op: "transport", Action: "play", Bars: tt.v},
+			{Op: "section", Action: "play", Section: "1", Seconds: tt.v},
+		} {
+			st, _ := newArrangerStudio(t, "Verse")
+			_, err := st.Do(context.Background(), req)
+			var p Problem
+			if !errors.As(err, &p) || !strings.HasSuffix(p.Message, tt.want) {
+				t.Errorf("seconds %v bars %v: err = %v, want %q", req.Seconds, req.Bars, err, tt.want)
+			}
+			if st.playing() {
+				t.Errorf("seconds %v bars %v started playback", req.Seconds, req.Bars)
+			}
+		}
+	}
+}
+
+// The landing wait for an import is capped as a float too: a header can
+// claim 2^64 frames.
+func TestLandingTimeoutCapsHugeHeaders(t *testing.T) {
+	for _, f := range []AudioFile{
+		{Frames: math.MaxUint64, Channels: 64, Bits: 64},
+		{Frames: 1 << 62, Channels: 2, Bits: 32},
+	} {
+		if got := landingTimeout(f); got != 3*time.Minute {
+			t.Errorf("%d frames: timeout = %v, want 3m0s", f.Frames, got)
+		}
+	}
+	if got := landingTimeout(AudioFile{Frames: 0, Channels: 2, Bits: 24}); got != 15*time.Second {
+		t.Errorf("small file: timeout = %v", got)
 	}
 }

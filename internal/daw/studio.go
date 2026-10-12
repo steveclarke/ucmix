@@ -262,26 +262,33 @@ func (st *Studio) transport(ctx context.Context, req Request) (Result, error) {
 }
 
 func (st *Studio) play(ctx context.Context, req Request) (Result, error) {
-	if req.Seconds < 0 || req.Bars < 0 || math.IsNaN(req.Seconds) || math.IsNaN(req.Bars) {
+	if !(req.Seconds >= 0) || !(req.Bars >= 0) {
 		return Result{}, Problem{Message: "a play length must be a positive number of seconds or bars"}
 	}
 	if req.Bars > 0 && st.Tempo() <= 0 {
 		return Result{}, Problem{Message: "Studio Pro has not reported the tempo, so bars cannot be timed", Hint: "give a length in seconds instead"}
 	}
-	duration := time.Duration(req.Seconds * float64(time.Second))
+	// The length stays a float until it is known to be in range: converting
+	// a huge or infinite float to a time.Duration overflows.
+	seconds := req.Seconds
 	what := ""
 	if req.Bars > 0 {
 		num, denom := st.timeSignature()
 		beats := req.Bars * float64(num) * 4 / float64(denom)
-		duration = time.Duration(beats * 60 / st.Tempo() * float64(time.Second))
+		seconds = beats * 60 / st.Tempo()
 		what = fmt.Sprintf("%s bar%s", trim(req.Bars), plural(req.Bars))
 	}
-	if duration > MaxPlay {
+	if seconds > MaxPlay.Seconds() {
+		length := "that"
+		if seconds < 24*time.Hour.Seconds() {
+			length = time.Duration(seconds * float64(time.Second)).Round(time.Second).String()
+		}
 		return Result{}, Problem{
-			Message: fmt.Sprintf("%s is longer than the %s limit for a timed play", duration.Round(time.Second), MaxPlay),
+			Message: fmt.Sprintf("%s is longer than the %s limit for a timed play", length, MaxPlay),
 			Hint:    "play without a length and stop it yourself",
 		}
 	}
+	duration := time.Duration(seconds * float64(time.Second))
 	if !st.playing() {
 		if err := st.press(ctx, "transport/start", NumIs("transport/start", 1)); err != nil {
 			if duration > 0 {
