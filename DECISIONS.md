@@ -567,3 +567,73 @@ Eight findings from the pre-merge review, each fixed test first. No live run aga
 ## 8. Spike scaffolding removed
 
 - `docs/superpowers/plans/2026-07-27-studio-pro-ucnet-poc.md` and `docs/superpowers/specs/2026-07-27-studio-pro-ucnet-poc-design.md` described the `ucdawpoc` proof that `ucdaw` superseded. Their protocol findings were already in Hugo `knowledge/ucnet-studio-pro/protocol.md` and this log; the one thing missing there, how the traffic was captured (`rvictl` remote virtual interface on the iPad), was added to Hugo first. Both files removed.
+
+## 9. Dialogs that could lose work are never answered
+
+- On "Save changes?" a No button discards the song, and labels alone cannot tell which button keeps the work. A dialog whose title or text mentions saving, discarding, deleting, removing, overwriting or closing (any form: "saving", "deleted", "overwrite", "closing"; case-insensitive) is left open whatever its buttons, even Cancel or a single OK, and the Problem names the dialog and its buttons with the hint "answer it in Studio Pro". Import does not answer a conversion question that mentions overwriting.
+- Tests: `TestDismissNeverAnswersADialogThatCouldLoseWork`, `TestImportNeverAnswersAConversionThatOverwrites`; `TestNewSongCancelsAnotherDialog` now expects its "Save Changes" dialog left open.
+
+## 10. Finding 6 checked live (11:52–11:58 NDT, Studio Pro 8.0.2, serve restarted with the new build, `--host 192.168.77.78`)
+
+- Only on a new song made for the test: `ucdaw song new --tempo 120` → "Started a new song (2026-10-12 Stephen Clarke(5)) at 120 bpm, click off." Before every step the script read `document/title` and would have stopped had the front song been anything else. Steve's remix and the other test songs were not touched; nothing saved or closed.
+- **Found: Studio Pro makes no section in a song with no tracks.** The first `section add Verse Chorus Bridge --bars 4` on the empty song answered "Adding section Verse was sent, but Studio Pro's arranger did not show it; sections now: none." (the count check, not the new list check: nothing arrived at all). After `ucdaw track add --name Guide` the same add worked. `section add` now refuses in a song with no tracks and says to add one (`TestSectionAddNeedsATrack`).
+- Every edit after that passed the whole-list check against the real arranger; no widening was needed (Studio Pro shifts later sections by exactly the section length). Output:
+
+```
+$ ucdaw track add --name Guide
+Added mono audio track Guide.
+$ ucdaw section add Verse --bars 4
+Added section Verse, 4 bars each; sections now: Verse bar 1.
+$ ucdaw section add Chorus Bridge --bars 4
+Added sections Chorus and Bridge, 4 bars each; sections now: Verse bar 1, Chorus bar 5, Bridge bar 9.
+$ ucdaw section list
+3 sections: Verse bar 1 (4 bars), Chorus bar 5 (4 bars), Bridge bar 9 (4 bars).
+$ ucdaw state
+120 bpm, 4/4, click off, loop off, stopped; 1 channel: Guide (audio, mono); sections: Verse bar 1, Chorus bar 5, Bridge bar 9.
+
+$ ucdaw section rename Bridge Outro
+Renamed Bridge to Outro.
+$ ucdaw section list
+3 sections: Verse bar 1 (4 bars), Chorus bar 5 (4 bars), Outro bar 9 (4 bars).
+$ ucdaw state
+120 bpm, 4/4, click off, loop off, stopped; 1 channel: Guide (audio, mono); sections: Verse bar 1, Chorus bar 5, Outro bar 9.
+
+$ ucdaw section duplicate Verse
+Duplicated Verse; the copy starts at bar 5 and the rest moved 4 bars later.
+$ ucdaw section list
+4 sections: Verse bar 1 (4 bars), Verse bar 5 (4 bars), Chorus bar 9 (4 bars), Outro bar 13 (4 bars).
+$ ucdaw state
+120 bpm, 4/4, click off, loop off, stopped; 1 channel: Guide (audio, mono); sections: Verse bar 1, Verse bar 5, Chorus bar 9, Outro bar 13.
+
+$ ucdaw section move Chorus after Outro
+Moved Chorus after Outro; it now starts at bar 13 (undo takes two steps).
+$ ucdaw section list
+4 sections: Verse bar 1 (4 bars), Verse bar 5 (4 bars), Outro bar 9 (4 bars), Chorus bar 13 (4 bars).
+$ ucdaw state
+120 bpm, 4/4, click off, loop off, stopped; 1 channel: Guide (audio, mono); sections: Verse bar 1, Verse bar 5, Outro bar 9, Chorus bar 13.
+
+$ ucdaw section delete Verse 2
+Deleted Verse (bar 5, 4 bars); the rest moved up to close the gap.
+$ ucdaw section list
+3 sections: Verse bar 1 (4 bars), Outro bar 5 (4 bars), Chorus bar 9 (4 bars).
+$ ucdaw state
+120 bpm, 4/4, click off, loop off, stopped; 1 channel: Guide (audio, mono); sections: Verse bar 1, Outro bar 5, Chorus bar 9.
+
+$ ucdaw section repeat Chorus after Verse
+Repeated Chorus after Verse, at bar 5; the rest moved 4 bars later.
+$ ucdaw section list
+4 sections: Verse bar 1 (4 bars), Chorus bar 5 (4 bars), Outro bar 9 (4 bars), Chorus bar 13 (4 bars).
+$ ucdaw state
+120 bpm, 4/4, click off, loop off, stopped; 1 channel: Guide (audio, mono); sections: Verse bar 1, Chorus bar 5, Outro bar 9, Chorus bar 13.
+
+$ ucdaw section move Outro before Verse
+Moved Outro before Verse; it now starts at bar 1 (undo takes two steps).
+$ ucdaw section list
+4 sections: Outro bar 1 (4 bars), Verse bar 5 (4 bars), Chorus bar 9 (4 bars), Chorus bar 13 (4 bars).
+$ ucdaw state
+120 bpm, 4/4, click off, loop off, stopped; 1 channel: Guide (audio, mono); sections: Outro bar 1, Verse bar 5, Chorus bar 9, Chorus bar 13.
+
+```
+
+- Wrong edits still fail: Studio Pro cannot be made to misbehave on purpose, so the failing cases stay covered by the fake arranger tests (wrong section deleted, wrong paste, no shift, extra rename).
+- Left as is: the test song "(5)" is the front tab, unsaved, with its Guide track and four sections. Nothing saved or closed; playback not started.

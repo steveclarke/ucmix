@@ -645,6 +645,14 @@ func (st *Studio) addSections(ctx context.Context, names string, bars float64) (
 	if bars < 1 || bars > MaxSectionBars || bars != math.Trunc(bars) || math.IsNaN(bars) {
 		return Result{}, Problem{Message: fmt.Sprintf("a section is a whole number of bars from 1 to %d", MaxSectionBars)}
 	}
+	// Studio Pro makes no section from a range in a song with no tracks
+	// (seen live on a new song); it answers nothing at all.
+	if len(st.channels()) == 0 {
+		return Result{}, Problem{
+			Message: "Studio Pro adds arranger sections only in a song with a track, and this song has no tracks",
+			Hint:    "add one first, e.g. ucdaw track add --name Guide",
+		}
+	}
 	var added []string
 	for _, name := range list {
 		before := st.sectionList()

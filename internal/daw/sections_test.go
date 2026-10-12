@@ -296,8 +296,18 @@ func TestSectionRename(t *testing.T) {
 	}
 }
 
+func withOneTrack(st *Studio) {
+	m := st.session.Model()
+	m.mutate(func(r func(string)) {
+		m.setNum("mixer/channel/count", 0.001, r)
+		m.setStr("mixer/channel/ch1/label", "Guide", r)
+		m.setStr("mixer/channel/ch1/type", "AudioTrack", r)
+	})
+}
+
 func TestSectionAdd(t *testing.T) {
 	st, _ := newArrangerStudio(t)
+	withOneTrack(st)
 	got := do(t, st, Request{Op: "section", Action: "add", Name: "Verse, Chorus, Bridge"})
 	if got != "Added sections Verse, Chorus and Bridge, 8 bars each; sections now: Verse bar 1, Chorus bar 9, Bridge bar 17." {
 		t.Errorf("add = %q", got)
@@ -399,5 +409,19 @@ func TestSectionRenameChecksTheWholeList(t *testing.T) {
 	var p Problem
 	if !errors.As(err, &p) || !strings.Contains(p.Message, "sections now: Outro bar 1") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Studio Pro makes no section from a range in a song with no tracks (seen
+// live on a new song), so ucdaw says so instead of waiting for nothing.
+func TestSectionAddNeedsATrack(t *testing.T) {
+	st, arr := newArrangerStudio(t)
+	_, err := st.Do(context.Background(), Request{Op: "section", Action: "add", Name: "Verse"})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "no tracks") || !strings.Contains(p.Hint, "track add") {
+		t.Errorf("err = %v", err)
+	}
+	if len(arr.log) != 0 {
+		t.Errorf("sent %v", arr.log)
 	}
 }
