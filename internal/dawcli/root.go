@@ -582,6 +582,10 @@ func Execute() {
 }
 
 func printError(w io.Writer, err error) {
+	if errors.Is(err, context.Canceled) {
+		fmt.Fprintln(w, "Interrupted.")
+		return
+	}
 	var p daw.Problem
 	if errors.As(err, &p) {
 		fmt.Fprintln(w, safe(p.Sentence()))

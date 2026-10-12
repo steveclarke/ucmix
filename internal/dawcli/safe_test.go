@@ -2,6 +2,8 @@ package dawcli
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,5 +65,13 @@ func TestCaptureFilesAreOwnerOnly(t *testing.T) {
 	info, _ := os.Stat(path)
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v", info.Mode().Perm())
+	}
+}
+
+func TestInterruptIsPlain(t *testing.T) {
+	var buf bytes.Buffer
+	printError(&buf, fmt.Errorf("x: %w", context.Canceled))
+	if buf.String() != "Interrupted.\n" {
+		t.Errorf("printed %q", buf.String())
 	}
 }
