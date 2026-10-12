@@ -306,16 +306,57 @@ func (st *Studio) play(ctx context.Context, req Request) (Result, error) {
 	if what == "" {
 		what = fmt.Sprintf("%s s", trim(round2(duration.Seconds())))
 	}
-	waitErr := sleepFor(ctx, duration)
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-	defer cancel()
-	if err := st.stop(stopCtx); err != nil {
+	interrupted, err := st.waitPlaying(ctx, duration)
+	switch {
+	case ctx.Err() != nil:
+		// The client hung up mid-play: still leave Studio Pro stopped.
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if err := st.stop(stopCtx); err != nil {
+			return Result{}, st.unconfirmed(err, "Stop after playing")
+		}
+		return Result{Message: "Interrupted; stopped."}, nil
+	case err != nil:
+		return Result{}, st.unconfirmed(err, "Play")
+	case interrupted:
+		// Someone stopped playback (in Studio Pro, or with ucdaw stop) and
+		// may have started it again; pressing Stop would end their playback.
+		return Result{Message: fmt.Sprintf("Playback was stopped elsewhere before the %s were up, so ucdaw did not press Stop.", what)}, nil
+	}
+	if err := st.stop(ctx); err != nil {
 		return Result{}, st.unconfirmed(err, "Stop after playing")
 	}
-	if waitErr != nil {
-		return Result{Message: "Interrupted; stopped."}, nil
-	}
 	return Result{Message: fmt.Sprintf("Played %s at %s bpm, then stopped.", what, trim(round2(st.Tempo())))}, nil
+}
+
+// waitPlaying waits out a timed play. It returns early, interrupted, as soon
+// as playback stops in Studio Pro; a stop followed by a restart counts, since
+// transport/start changing at all after playback began means someone else
+// took over the transport.
+func (st *Studio) waitPlaying(ctx context.Context, d time.Duration) (interrupted bool, err error) {
+	seq := st.model().Seq()
+	stoppedSince := func(m *Model) bool {
+		if v, ok := m.Num("transport/start"); ok && v < 0.5 {
+			return true
+		}
+		for _, p := range m.ChangesSince(seq) {
+			if p == "transport/start" {
+				return true
+			}
+		}
+		return false
+	}
+	deadline, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		_ = sleepFor(deadline, d)
+		cancel()
+	}()
+	err = st.session.WaitFor(deadline, stoppedSince)
+	if errors.Is(err, ErrConnectionClosed) {
+		return false, err
+	}
+	return stoppedSince(st.model()), nil
 }
 
 func (st *Studio) loop(ctx context.Context, action, value string) (Result, error) {

@@ -154,3 +154,78 @@ func TestLandingTimeoutCapsHugeHeaders(t *testing.T) {
 		t.Errorf("small file: timeout = %v", got)
 	}
 }
+
+// A timed play that the musician stops (and maybe restarts) in Studio Pro
+// must not end with ucdaw pressing Stop on their playback.
+func TestTimedPlayLeavesAStopAndRestartAlone(t *testing.T) {
+	st, fake := newStudio(t)
+	sleepFor = func(ctx context.Context, d time.Duration) error {
+		if d == gestureHold {
+			return nil
+		}
+		fake.frames <- pv("transport/start", 0)
+		fake.frames <- pv("transport/stop", 1)
+		fake.frames <- pv("transport/start", 1)
+		fake.frames <- pv("transport/stop", 0)
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+		}
+		return nil
+	}
+	res, err := st.Do(context.Background(), Request{Op: "transport", Action: "play", Bars: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Message, "stopped elsewhere") {
+		t.Errorf("message = %q", res.Message)
+	}
+	fake.mu.Lock()
+	presses := len(fake.batches)
+	fake.mu.Unlock()
+	if presses != 1 {
+		t.Errorf("gestures = %d, want only Play", presses)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = st.session.WaitFor(waitCtx, NumIs("transport/start", 1))
+	if !st.playing() {
+		t.Error("the musician's playback was stopped")
+	}
+}
+
+// At the deadline ucdaw presses Stop only if Studio Pro is still playing.
+func TestTimedPlayStopsAtTheDeadline(t *testing.T) {
+	st, fake := newStudio(t)
+	got := do(t, st, Request{Op: "transport", Action: "play", Seconds: 2})
+	if got != "Played 2 s at 120 bpm, then stopped." {
+		t.Errorf("play = %q", got)
+	}
+	fake.mu.Lock()
+	presses := len(fake.batches)
+	fake.mu.Unlock()
+	if presses != 2 || st.playing() {
+		t.Errorf("gestures = %d, playing %v", presses, st.playing())
+	}
+}
+
+// A client that hangs up mid-play still leaves Studio Pro stopped.
+func TestTimedPlayStopsWhenTheClientHangsUp(t *testing.T) {
+	st, _ := newStudio(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	sleepFor = func(c context.Context, d time.Duration) error {
+		if d == gestureHold {
+			return nil
+		}
+		cancel()
+		<-c.Done()
+		return c.Err()
+	}
+	res, err := st.Do(ctx, Request{Op: "transport", Action: "play", Seconds: 5})
+	if err != nil || res.Message != "Interrupted; stopped." {
+		t.Errorf("play = %q, %v", res.Message, err)
+	}
+	if st.playing() {
+		t.Error("still playing")
+	}
+}
