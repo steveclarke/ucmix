@@ -171,3 +171,18 @@ Ran Edit > Undo: removed Guitar.
 ```
 
 - Not testable here: Steve's own Guitar Rig "clean" preset. This MacBook has no Studio Pro user presets (`~/Documents/Studio One` holds none). If his clean sound is a Guitar Rig preset saved inside Guitar Rig rather than as a Studio Pro preset, he saves it once from Studio Pro's plug-in window preset menu; then `--preset <name>` loads it.
+
+## Headline flow from a fresh `claude -p` (00:10 NDT)
+
+Prompt: "give me a guitar track with Guitar Rig on it. Then show me the song. Then undo what you did so the song is empty again, and confirm it is." Transcript in Hugo `personal/projects/talk-to-daw/research/overnight-2026-10-12-mcp-guitar-transcript.jsonl`.
+
+```
+get_song                        -> 120 bpm, 4/4, click on, loop off, stopped; no tracks yet.
+list_plugins "guitar rig"       -> 1 plug-in match "guitar rig".
+add_track Guitar, mono          -> Added mono audio track Guitar.
+add_insert Guitar, Guitar Rig 7 -> Added Guitar Rig 7 to Guitar (insert 1).
+get_song                        -> ... 1 channel: Guitar (audio, mono; Guitar Rig 7).
+run_command Edit / Undo         -> Ran Edit > Undo: removed Guitar Rig 7 from Guitar.
+run_command Edit / Undo         -> Ran Edit > Undo: removed Guitar.
+get_song                        -> ... no tracks yet.
+```
