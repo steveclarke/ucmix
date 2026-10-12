@@ -49,6 +49,15 @@ func (f *fakeTransport) Send(ctx context.Context, fr proto.Frame) error {
 	return nil
 }
 
+func (f *fakeTransport) SendBatch(ctx context.Context, frames []proto.Frame) error {
+	for _, frame := range frames {
+		if err := f.Send(ctx, frame); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeTransport) Frames() <-chan proto.Frame { return f.in }
 
 func (f *fakeTransport) Close() error {

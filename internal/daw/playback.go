@@ -13,17 +13,17 @@ type Controller interface {
 }
 
 const emergencyStopTimeout = 2 * time.Second
+const maxPlaybackProbeDuration = 10 * time.Second
 
 // PulsePlayback confirms Stop, attempts Play, and guarantees a bounded
-// best-effort Stop. Duration is capped at one second from the Play attempt,
-// including the time spent waiting for Play confirmation.
+// best-effort Stop. Duration is capped at ten seconds.
 func PulsePlayback(
 	ctx context.Context,
 	controller Controller,
 	duration time.Duration,
 ) (err error) {
-	if duration < 0 || duration > time.Second {
-		return fmt.Errorf("daw: playback duration must be between 0 and 1s")
+	if duration < 0 || duration > maxPlaybackProbeDuration {
+		return fmt.Errorf("daw: playback duration must be between 0 and 10s")
 	}
 	if err := controller.Trigger(ctx, Stop); err != nil {
 		return fmt.Errorf("daw: initial stop: %w", err)
@@ -46,22 +46,14 @@ func PulsePlayback(
 		}
 	}()
 
-	stopDeadline := time.Now().Add(time.Second)
-	playCtx, cancelPlay := context.WithDeadline(ctx, stopDeadline)
+	playCtx, cancelPlay := context.WithTimeout(ctx, time.Second)
 	if err := controller.Trigger(playCtx, Play); err != nil {
 		cancelPlay()
 		return fmt.Errorf("daw: play: %w", err)
 	}
 	cancelPlay()
 
-	wait := duration
-	if remaining := time.Until(stopDeadline); wait > remaining {
-		wait = remaining
-	}
-	if wait < 0 {
-		wait = 0
-	}
-	timer := time.NewTimer(wait)
+	timer := time.NewTimer(duration)
 	defer timer.Stop()
 	select {
 	case <-timer.C:

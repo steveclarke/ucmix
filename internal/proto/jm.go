@@ -17,6 +17,12 @@ func MarshalJM(v any) []byte {
 		// fall back to an empty body rather than crash a caller.
 		body = []byte("{}")
 	}
+	return MarshalJMRaw(body)
+}
+
+// MarshalJMRaw adds the JM body-length prefix without re-encoding body. It is
+// used for peers whose captured handshake requires a byte-exact JSON body.
+func MarshalJMRaw(body []byte) []byte {
 	n := len(body)
 	out := make([]byte, 0, 4+n)
 	out = append(out, byte(n), byte(n>>8), byte(n>>16), byte(n>>24))

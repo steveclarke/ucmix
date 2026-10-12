@@ -3,9 +3,11 @@ package daw
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"net"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 type fakeTransport struct {
 	mu      sync.Mutex
 	sent    []proto.Frame
+	batches [][]proto.Frame
 	in      chan proto.Frame
 	done    chan struct{}
 	onSend  func(proto.Frame)
@@ -48,6 +51,28 @@ func (f *fakeTransport) Send(ctx context.Context, frame proto.Frame) error {
 	return nil
 }
 
+func (f *fakeTransport) SendBatch(ctx context.Context, frames []proto.Frame) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-f.done:
+		return transport.ErrClosed
+	default:
+	}
+	f.mu.Lock()
+	batch := append([]proto.Frame(nil), frames...)
+	f.batches = append(f.batches, batch)
+	f.sent = append(f.sent, batch...)
+	hook := f.onSend
+	f.mu.Unlock()
+	if hook != nil {
+		for _, frame := range batch {
+			hook(frame)
+		}
+	}
+	return nil
+}
+
 func (f *fakeTransport) Frames() <-chan proto.Frame { return f.in }
 
 func (f *fakeTransport) Close() error {
@@ -64,6 +89,16 @@ func (f *fakeTransport) sentFrames() []proto.Frame {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]proto.Frame(nil), f.sent...)
+}
+
+func (f *fakeTransport) sentBatches() [][]proto.Frame {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]proto.Frame, len(f.batches))
+	for i, batch := range f.batches {
+		out[i] = append([]proto.Frame(nil), batch...)
+	}
+	return out
 }
 
 func (f *fakeTransport) closed() bool {
@@ -158,6 +193,9 @@ func TestConnectPerformsCapturedHandshake(t *testing.T) {
 				}),
 			})
 		}
+		if msg.ID == "Subscribe" {
+			tcp.deliver(completeCKFrame(t))
+		}
 	}
 
 	client, err := Connect(
@@ -203,6 +241,81 @@ func TestConnectPerformsCapturedHandshake(t *testing.T) {
 	}
 }
 
+func completeCKFrame(t *testing.T) proto.Frame {
+	t.Helper()
+	blob, err := proto.BuildZB(map[string]any{
+		"transport/start": float64(0),
+		"transport/stop":  float64(1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, 16+len(blob))
+	copy(payload[:4], []byte{0, 0, 'Z', 'B'})
+	binary.LittleEndian.PutUint32(payload[4:8], 0)
+	binary.LittleEndian.PutUint32(payload[8:12], uint32(len(blob)))
+	binary.LittleEndian.PutUint32(payload[12:16], uint32(len(blob)))
+	copy(payload[16:], blob)
+	return proto.Frame{Code: proto.CodeCK, Payload: payload}
+}
+
+func TestConnectWaitsForInitialSnapshot(t *testing.T) {
+	tcp := newFakeTransport()
+	udp := newFakeMeteringConn(58395)
+	useClientFakes(t, tcp, udp)
+	subscribed := make(chan struct{})
+	tcp.onSend = func(frame proto.Frame) {
+		if frame.Code != proto.CodeJM {
+			return
+		}
+		msg, _ := proto.ParseJM(frame.Payload)
+		switch msg.ID {
+		case "QueryUserLicense":
+			tcp.deliver(proto.Frame{
+				Code: proto.CodeJM,
+				Payload: proto.MarshalJM(map[string]string{
+					"id": "UserLicenseReply",
+				}),
+			})
+		case "Subscribe":
+			close(subscribed)
+		}
+	}
+
+	type result struct {
+		client *Client
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		client, err := Connect(
+			context.Background(),
+			Endpoint{IP: "192.0.2.20", ControlPort: 49601, ServerID: 0x6b},
+		)
+		done <- result{client: client, err: err}
+	}()
+	<-subscribed
+
+	select {
+	case got := <-done:
+		if got.client != nil {
+			_ = got.client.Close()
+		}
+		t.Fatalf("Connect returned before initial CK snapshot: %v", got.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	tcp.deliver(completeCKFrame(t))
+	got := <-done
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if !got.client.transportConfirmed("transport/stop") {
+		t.Fatal("Connect did not retain transport/stop=1 from snapshot")
+	}
+	_ = got.client.Close()
+}
+
 func TestConnectClosesSocketsWhenLicenseWaitIsCanceled(t *testing.T) {
 	tcp := newFakeTransport()
 	udp := newFakeMeteringConn(58395)
@@ -218,6 +331,27 @@ func TestConnectClosesSocketsWhenLicenseWaitIsCanceled(t *testing.T) {
 	}
 	if !tcp.closed() || !udp.closed() {
 		t.Fatal("failed Connect did not close both sockets")
+	}
+}
+
+func TestConnectTimesOutLicenseWait(t *testing.T) {
+	tcp := newFakeTransport()
+	udp := newFakeMeteringConn(58395)
+	useClientFakes(t, tcp, udp)
+
+	_, err := Connect(
+		context.Background(),
+		Endpoint{IP: "192.0.2.20", ControlPort: 49601, ServerID: 0x6b},
+		HandshakeTimeout(20*time.Millisecond),
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Connect = %v, want context.DeadlineExceeded", err)
+	}
+	if !strings.Contains(err.Error(), "waiting for license reply") {
+		t.Fatalf("Connect error lacks handshake stage: %v", err)
+	}
+	if !tcp.closed() || !udp.closed() {
+		t.Fatal("timed-out Connect did not close both sockets")
 	}
 }
 
@@ -262,6 +396,44 @@ func TestTriggerStopUsesDistinctPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertActionFrames(t, tcp.sentFrames(), "transport/stop")
+}
+
+func TestTriggerBatchesPressAndValueThenHoldsBeforeRelease(t *testing.T) {
+	client, tcp := actionClient(t)
+	tcp.onSend = confirmAction(tcp, "transport/stop")
+	original := actionHold
+	var held time.Duration
+	actionHold = func(_ context.Context, duration time.Duration) error {
+		held = duration
+		return nil
+	}
+	t.Cleanup(func() { actionHold = original })
+
+	if err := client.Trigger(context.Background(), Stop); err != nil {
+		t.Fatal(err)
+	}
+	batches := tcp.sentBatches()
+	if len(batches) != 1 || len(batches[0]) != 2 {
+		t.Fatalf("batches = %+v, want one two-frame batch", batches)
+	}
+	if batches[0][0].Code != proto.CodePE || batches[0][1].Code != proto.CodePV {
+		t.Fatalf("batch codes = %q, %q", batches[0][0].Code, batches[0][1].Code)
+	}
+	if held != 80*time.Millisecond {
+		t.Fatalf("gesture hold = %s, want 80ms", held)
+	}
+}
+
+func TestTriggerAcceptsAlreadyConfirmedSnapshotState(t *testing.T) {
+	client, _ := actionClient(t)
+	client.transportState = map[string]float32{"transport/stop": 1}
+	original := actionHold
+	actionHold = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() { actionHold = original })
+
+	if err := client.Trigger(context.Background(), Stop); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func confirmAction(tcp *fakeTransport, wantKey string) func(proto.Frame) {
@@ -353,5 +525,17 @@ func TestTriggerReportsClosedConnection(t *testing.T) {
 	}
 	if err := client.Trigger(context.Background(), Play); !errors.Is(err, ErrConnectionClosed) {
 		t.Fatalf("Trigger = %v, want ErrConnectionClosed", err)
+	}
+}
+
+func TestTriggerUsesConfiguredTimeout(t *testing.T) {
+	client, _ := actionClient(t)
+	client.actionTimeout = 150 * time.Millisecond
+	err := client.Trigger(context.Background(), Stop)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Trigger = %v, want context.DeadlineExceeded", err)
+	}
+	if !strings.Contains(err.Error(), "waiting for stop confirmation") {
+		t.Fatalf("Trigger error lacks action stage: %v", err)
 	}
 }

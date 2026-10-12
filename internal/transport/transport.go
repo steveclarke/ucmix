@@ -45,6 +45,9 @@ type Transport interface {
 	// Send encodes and writes f. It is paced (token-bucket over frame count)
 	// and safe for concurrent callers. It returns ErrClosed after Close.
 	Send(ctx context.Context, f proto.Frame) error
+	// SendBatch encodes frames in order and writes them in one TCP write. The
+	// frame count still participates in pacing.
+	SendBatch(ctx context.Context, frames []proto.Frame) error
 	// Frames delivers inbound frames. It is closed on connection loss.
 	Frames() <-chan proto.Frame
 	// Close stops the read loop and keep-alive and closes the connection.
@@ -161,6 +164,25 @@ func (t *transport) Frames() <-chan proto.Frame { return t.frames }
 // frames. The write and counter are mutex-guarded so concurrent callers are
 // safe; the pace sleep runs after unlocking so it does not hold off other work.
 func (t *transport) Send(ctx context.Context, f proto.Frame) error {
+	return t.sendEncoded(ctx, proto.Encode(f), 1)
+}
+
+func (t *transport) SendBatch(ctx context.Context, frames []proto.Frame) error {
+	if len(frames) == 0 {
+		return nil
+	}
+	size := 0
+	for _, frame := range frames {
+		size += len(proto.Encode(frame))
+	}
+	wire := make([]byte, 0, size)
+	for _, frame := range frames {
+		wire = append(wire, proto.Encode(frame)...)
+	}
+	return t.sendEncoded(ctx, wire, len(frames))
+}
+
+func (t *transport) sendEncoded(ctx context.Context, wire []byte, frameCount int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -173,16 +195,17 @@ func (t *transport) Send(ctx context.Context, f proto.Frame) error {
 		t.mu.Unlock()
 		return ErrClosed
 	}
-	_, err := t.conn.Write(proto.Encode(f))
+	_, err := t.conn.Write(wire)
 	if err != nil {
 		t.mu.Unlock()
 		return err
 	}
-	t.sendCount++
-	shouldPace := t.sendCount%t.opts.PaceEvery == 0
+	before := t.sendCount / t.opts.PaceEvery
+	t.sendCount += frameCount
+	paceWindows := t.sendCount/t.opts.PaceEvery - before
 	t.mu.Unlock()
 
-	if shouldPace {
+	for range paceWindows {
 		sleep(t.opts.PaceDelay)
 	}
 	return nil

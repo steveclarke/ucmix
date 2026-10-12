@@ -30,6 +30,49 @@ type fakeSleep struct {
 	paceCalls []time.Duration
 }
 
+type recordingConn struct {
+	mu        sync.Mutex
+	writes    [][]byte
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newRecordingConn() *recordingConn {
+	return &recordingConn{closed: make(chan struct{})}
+}
+
+func (c *recordingConn) Read([]byte) (int, error) {
+	<-c.closed
+	return 0, io.EOF
+}
+
+func (c *recordingConn) Write(data []byte) (int, error) {
+	c.mu.Lock()
+	c.writes = append(c.writes, append([]byte(nil), data...))
+	c.mu.Unlock()
+	return len(data), nil
+}
+
+func (c *recordingConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
+
+func (c *recordingConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (c *recordingConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (c *recordingConn) SetDeadline(time.Time) error      { return nil }
+func (c *recordingConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *recordingConn) SetWriteDeadline(time.Time) error { return nil }
+func (c *recordingConn) recordedWrites() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([][]byte, len(c.writes))
+	for i, write := range c.writes {
+		out[i] = append([]byte(nil), write...)
+	}
+	return out
+}
+
 func (s *fakeSleep) sleep(d time.Duration) {
 	switch d {
 	case s.ka:
@@ -142,6 +185,38 @@ func TestPacingSleepsPerWindow(t *testing.T) {
 		if d != 5*time.Millisecond {
 			t.Fatalf("pace sleep %d = %v, want 5ms", i, d)
 		}
+	}
+}
+
+func TestSendBatchUsesOneTCPWrite(t *testing.T) {
+	conn := newRecordingConn()
+	fs := &fakeSleep{ka: time.Hour, pace: 25 * time.Millisecond}
+	install(t, fs, conn)
+
+	tr, err := Dial(context.Background(), "board:53000", Options{
+		KeepAlive: time.Hour,
+		PaceEvery: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopAndWait(t, tr, fs)
+
+	frames := []proto.Frame{
+		{Code: proto.CodePE, Payload: proto.MarshalPE("transport/stop", 2)},
+		{Code: proto.CodePV, Payload: proto.MarshalPV("transport/stop", 1)},
+	}
+	if err := tr.SendBatch(context.Background(), frames); err != nil {
+		t.Fatal(err)
+	}
+
+	writes := conn.recordedWrites()
+	if len(writes) != 1 {
+		t.Fatalf("TCP writes = %d, want 1", len(writes))
+	}
+	want := append(proto.Encode(frames[0]), proto.Encode(frames[1])...)
+	if !reflect.DeepEqual(writes[0], want) {
+		t.Fatalf("batch write = % x, want % x", writes[0], want)
 	}
 }
 

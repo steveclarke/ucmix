@@ -1,19 +1,28 @@
 package daw
 
-type queryLicenseMessage struct {
-	ID                 string `json:"id"`
-	ClientInternalName string `json:"clientInternalName"`
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func queryUserLicenseBody() []byte {
+	return []byte(
+		`{"id": "QueryUserLicense","clientInternalName": "dawremote"}`,
+	)
 }
 
-type subscribeMessage struct {
-	ID                 string `json:"id"`
-	ClientName         string `json:"clientName"`
-	ClientInternalName string `json:"clientInternalName"`
-	ClientType         string `json:"clientType"`
-	ClientDescription  string `json:"clientDescription"`
-	ClientIdentifier   string `json:"clientIdentifier"`
-	ClientOptions      string `json:"clientOptions"`
-	ClientEncoding     int    `json:"clientEncoding"`
+func subscribeBody(clientIdentifier string) []byte {
+	identifier, err := json.Marshal(clientIdentifier)
+	if err != nil {
+		identifier = []byte(`"00000000-0000-4000-8000-000000000000"`)
+	}
+	return []byte(fmt.Sprintf(
+		`{"id": "Subscribe","clientName": "Studio Pro Remote",`+
+			`"clientInternalName": "dawremote","clientType": "iPad",`+
+			`"clientDescription": "iPad","clientIdentifier": %s,`+
+			`"clientOptions": "surround","clientEncoding": 23117}`,
+		identifier,
+	))
 }
 
 func mainConnID(endpoint Endpoint) [4]byte {
@@ -22,24 +31,4 @@ func mainConnID(endpoint Endpoint) [4]byte {
 
 func meterConnID(endpoint Endpoint) [4]byte {
 	return [4]byte{0, 0, endpoint.ServerID, 0}
-}
-
-func queryUserLicense() queryLicenseMessage {
-	return queryLicenseMessage{
-		ID:                 "QueryUserLicense",
-		ClientInternalName: "dawremote",
-	}
-}
-
-func subscribe(identifier string) subscribeMessage {
-	return subscribeMessage{
-		ID:                 "Subscribe",
-		ClientName:         "Studio Pro Remote",
-		ClientInternalName: "dawremote",
-		ClientType:         "iPad",
-		ClientDescription:  "iPad",
-		ClientIdentifier:   identifier,
-		ClientOptions:      "surround",
-		ClientEncoding:     23117,
-	}
 }
