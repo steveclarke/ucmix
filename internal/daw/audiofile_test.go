@@ -108,7 +108,7 @@ func TestReadAudioFileHeaders(t *testing.T) {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		c.want.Path = p
-		if got != c.want {
+		if public := (AudioFile{Path: got.Path, Container: got.Container, Channels: got.Channels, SampleRate: got.SampleRate, Bits: got.Bits, Frames: got.Frames}); public != c.want {
 			t.Errorf("%s = %+v, want %+v", c.name, got, c.want)
 		}
 	}

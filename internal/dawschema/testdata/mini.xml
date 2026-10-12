@@ -5,6 +5,7 @@
 		<uc:Range id="Tempo" min="10" max="400" def="120" units="bpm.value"/>
 		<uc:Range id="Volume" min="0" max="3.1622" def="1" curve="fadercurve" units="gain.db.value"/>
 		<uc:Range id="Num" min="1" max="32" def="4"/>
+		<uc:Range id="InputGain" min="-24" max="24" def="0"/>
 		<uc:StringList id="Denom">
 			<uc:String text="2"/>
 			<uc:String text="4"/>
@@ -37,6 +38,9 @@
 			<uc:Param id="volume" type="float" range="Volume" name="Volume"/>
 			<uc:Param id="gain" type="float" min="0" max="1.5"/>
 		</uc:ParamList>
+		<uc:ParamList id="InputFXParams">
+			<uc:Param id="gain" type="float" range="InputGain" name="Input Gain"/>
+		</uc:ParamList>
 		<uc:ParamList id="InsertSlot">
 			<uc:Param id="deviceName" type="string" flags="readonly"/>
 		</uc:ParamList>
@@ -52,6 +56,7 @@
 		</uc:Template>
 		<uc:Template id="Base">
 			<uc:Component id="inserts" template="Inserts" paramlist="Group"/>
+			<uc:Component id="inputfx" paramlist="InputFXParams"/>
 		</uc:Template>
 		<uc:Template id="Strip" inherit="Base">
 			<uc:Component id="extra" paramlist="Document" condition="surround"/>

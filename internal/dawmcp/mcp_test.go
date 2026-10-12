@@ -3,6 +3,7 @@ package dawmcp
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -78,6 +79,15 @@ func TestToolsMapToRequests(t *testing.T) {
 		{"import_audio", map[string]any{"paths": []string{"/v.wav"}, "onto": "Vox", "bar": 17}, daw.Request{Op: "import", Files: []string{"/v.wav"}, Onto: "Vox", At: 17}},
 		{"section", map[string]any{"action": "repeat", "section": "Chorus 1", "target": "Bridge"}, daw.Request{Op: "section", Action: "repeat", Section: "Chorus 1", Target: "Bridge"}},
 		{"section", map[string]any{"action": "add", "name": "Verse, Chorus", "bars": 4}, daw.Request{Op: "section", Action: "add", Name: "Verse, Chorus", Bars: 4}},
+		{"trim", map[string]any{"track": "Bass", "db": 20}, daw.Request{Op: "trim", Path: "Bass", Action: "set", Value: "20"}},
+		{"trim", map[string]any{"track": "Bass", "db": -6}, daw.Request{Op: "trim", Path: "Bass", Action: "set", Value: "-6"}},
+		{"trim", map[string]any{"track": "Bass", "change": -2}, daw.Request{Op: "trim", Path: "Bass", Action: "down", Value: "2"}},
+		{"trim", map[string]any{"track": "Bass"}, daw.Request{Op: "trim", Path: "Bass"}},
+		{"gain_stage", map[string]any{}, daw.Request{Op: "gainstage"}},
+		{"gain_stage", map[string]any{"tracks": []string{"Bass"}, "target": -20}, daw.Request{Op: "gainstage", Tracks: []string{"Bass"}, TargetDBFS: -20}},
+		{"analyze_audio", map[string]any{"tracks": []string{"Bass"}}, daw.Request{Op: "analyze", Tracks: []string{"Bass"}}},
+		{"analyze_audio", map[string]any{}, daw.Request{Op: "analyze"}},
+		{"analyze_audio", map[string]any{"paths": []string{"/stems"}, "tracks": []string{"Bass"}}, daw.Request{Op: "analyze", Files: []string{"/stems"}, Tracks: []string{"Bass"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tool, func(t *testing.T) {
@@ -126,7 +136,7 @@ func TestEveryToolHasADescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 21 {
+	if len(tools.Tools) != 24 {
 		t.Errorf("tools = %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
@@ -146,5 +156,27 @@ func TestFavoriteToolWorksWithoutStudioPro(t *testing.T) {
 	}
 	if text(t, res) != "No favorites yet." || len(engine.got) != 0 {
 		t.Errorf("favorite list = %q, engine calls %d", text(t, res), len(engine.got))
+	}
+}
+
+func TestAnalyzeFilesWorksWithoutStudioPro(t *testing.T) {
+	engine := &fakeEngine{}
+	cs := connect(t, engine)
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "analyze_audio", Arguments: map[string]any{"paths": []string{t.TempDir()}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(text(t, res), "Nothing to measure") || len(engine.got) != 0 {
+		t.Errorf("analyze = %q, engine calls %d", text(t, res), len(engine.got))
+	}
+}
+
+func TestInstructionsCarryTheMixingWorkflow(t *testing.T) {
+	cs := connect(t, &fakeEngine{})
+	got := cs.InitializeResult().Instructions
+	for _, want := range []string{"analyze_audio", "gain_stage", "never normalize", "-18", "ask"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("instructions lack %q", want)
+		}
 	}
 }

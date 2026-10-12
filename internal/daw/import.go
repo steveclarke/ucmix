@@ -161,6 +161,8 @@ func (st *Studio) importAudio(ctx context.Context, req Request) (Result, error) 
 			return Result{}, importProblem(done, err)
 		}
 	}
+	title, _ := st.model().Str("document/title")
+	recordImports(title, done)
 	if skips == nil {
 		skips = []skipped{}
 	}

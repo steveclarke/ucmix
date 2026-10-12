@@ -105,6 +105,9 @@ func newRootCmd() *cobra.Command {
 		newImportCmd(o),
 		newSongCmd(o),
 		newFaderCmd(o),
+		newTrimCmd(o),
+		newAnalyzeCmd(o),
+		newGainStageCmd(o),
 		newInstrumentCmd(o),
 		newFavoriteCmd(o),
 		newPluginsCmd(o),
@@ -122,8 +125,11 @@ func run(cmd *cobra.Command, o *options, req daw.Request) error {
 		return err
 	}
 	timeout := daw.MaxPlay + 30*time.Second
-	if req.Op == "import" {
+	switch req.Op {
+	case "import":
 		timeout = importTimeout
+	case "analyze", "gainstage":
+		timeout = analyzeTimeout
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
@@ -140,8 +146,11 @@ func printResult(w io.Writer, o *options, res daw.Result) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(res)
 	}
-	if _, err := fmt.Fprintln(w, safe(res.Message)); err != nil {
-		return err
+	// Each line on its own: safe() would turn a line break into "?".
+	for _, line := range strings.Split(res.Message, "\n") {
+		if _, err := fmt.Fprintln(w, safe(line)); err != nil {
+			return err
+		}
 	}
 	return printRows(w, res.Data)
 }
@@ -339,8 +348,20 @@ func newParamCmd(o *options) *cobra.Command {
 	set := &cobra.Command{
 		Use:   "set <path> <value>",
 		Short: "Write one parameter in its own units and confirm it (e.g. mixer/channel/ch1/mute on)",
-		Args:  cobra.MinimumNArgs(2),
+		// Values may be negative (-6 dB), so the command reads its own
+		// arguments; see globalArgs.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, help, err := globalArgs(args, o)
+			if help {
+				return cmd.Help()
+			}
+			if err != nil {
+				return err
+			}
+			if len(args) < 2 {
+				return daw.Problem{Message: "give a path and a value, e.g. ucdaw param set mixer/channel/ch1/volume -6"}
+			}
 			return run(cmd, o, daw.Request{Op: "set", Path: args[0], Value: strings.Join(args[1:], " ")})
 		},
 	}

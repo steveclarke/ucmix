@@ -3,6 +3,7 @@ package dawcli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -167,7 +168,7 @@ func TestFaderRequest(t *testing.T) {
 		"Pad -inf --json": {Op: "fader", Path: "Pad", Action: "set", Value: "-inf"},
 	}
 	for in, want := range cases {
-		got, help, err := faderRequest(strings.Fields(in), o)
+		got, help, err := levelRequest("fader", strings.Fields(in), o)
 		if err != nil || help || !reflect.DeepEqual(got, want) {
 			t.Errorf("%q = %+v, %v, %v", in, got, help, err)
 		}
@@ -176,8 +177,86 @@ func TestFaderRequest(t *testing.T) {
 		t.Error("--json not applied")
 	}
 	for _, bad := range []string{"", "Pad -6 --down 3", "Pad --up", "a b c"} {
-		if _, _, err := faderRequest(strings.Fields(bad), &options{}); err == nil {
+		if _, _, err := levelRequest("fader", strings.Fields(bad), &options{}); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+func TestNegativeLevelsAreValues(t *testing.T) {
+	cases := []struct {
+		args []string
+		want daw.Request
+	}{
+		{[]string{"fader", "Drums", "-3"}, daw.Request{Op: "fader", Path: "Drums", Action: "set", Value: "-3"}},
+		{[]string{"trim", "Bass", "-6"}, daw.Request{Op: "trim", Path: "Bass", Action: "set", Value: "-6"}},
+		{[]string{"trim", "Bass", "20"}, daw.Request{Op: "trim", Path: "Bass", Action: "set", Value: "20"}},
+		{[]string{"trim", "Bass", "--up", "3"}, daw.Request{Op: "trim", Path: "Bass", Action: "up", Value: "3"}},
+		{[]string{"trim", "Bass"}, daw.Request{Op: "trim", Path: "Bass"}},
+		{[]string{"trim", "Bass", "-6", "--host", "192.0.2.1", "--json"}, daw.Request{Op: "trim", Path: "Bass", Action: "set", Value: "-6"}},
+		{[]string{"--host", "192.0.2.1", "fader", "Lead Vox", "-4.5"}, daw.Request{Op: "fader", Path: "Lead Vox", Action: "set", Value: "-4.5"}},
+		{[]string{"fader", "Drums", "-3", "--socket=/tmp/x", "--schema", "/tmp/s.xml", "--direct"}, daw.Request{Op: "fader", Path: "Drums", Action: "set", Value: "-3"}},
+		{[]string{"param", "set", "mixer/channel/ch1/volume", "-6"}, daw.Request{Op: "set", Path: "mixer/channel/ch1/volume", Value: "-6"}},
+		{[]string{"param", "set", "mixer/channel/ch1/inputfx/gain", "-12", "--json"}, daw.Request{Op: "set", Path: "mixer/channel/ch1/inputfx/gain", Value: "-12"}},
+		{[]string{"gainstage"}, daw.Request{Op: "gainstage"}},
+		{[]string{"gainstage", "Bass", "Keys", "--target", "-20"}, daw.Request{Op: "gainstage", Tracks: []string{"Bass", "Keys"}, TargetDBFS: -20}},
+		{[]string{"analyze", "Bass"}, daw.Request{Op: "analyze", Tracks: []string{"Bass"}}},
+		{[]string{"analyze"}, daw.Request{Op: "analyze"}},
+	}
+	for _, tt := range cases {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			engine := &fakeEngine{res: daw.Result{Message: "ok"}}
+			if _, err := execute(t, engine, tt.args...); err != nil {
+				t.Fatal(err)
+			}
+			if len(engine.got) != 1 || !reflect.DeepEqual(engine.got[0], tt.want) {
+				t.Errorf("request = %+v, want %+v", engine.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLevelArgsApplyGlobalFlags(t *testing.T) {
+	o := &options{}
+	if _, _, err := levelRequest("trim", strings.Fields("Bass -6 --host 192.0.2.1 --socket /tmp/s --schema=/x.xml --direct --json"), o); err != nil {
+		t.Fatal(err)
+	}
+	if o.host != "192.0.2.1" || o.socket != "/tmp/s" || o.schemaPath != "/x.xml" || !o.direct || !o.json {
+		t.Errorf("options = %+v", o)
+	}
+	if _, _, err := levelRequest("trim", []string{"Bass", "--host"}, &options{}); err == nil {
+		t.Error("--host without a value accepted")
+	}
+}
+
+// Files are measured on this Mac without Studio Pro; a name that is not a
+// file is a track, measured through Studio Pro.
+func TestAnalyzeFilesNeedNoStudioPro(t *testing.T) {
+	dir := t.TempDir()
+	engine := &fakeEngine{err: errors.New("Studio Pro was asked")}
+	_, err := execute(t, engine, "analyze", dir)
+	if err == nil || !strings.Contains(err.Error(), "Nothing to measure") || len(engine.got) != 0 {
+		t.Errorf("err = %v, sent %v", err, engine.got)
+	}
+	engine = &fakeEngine{res: daw.Result{Message: "ok"}}
+	if _, err := execute(t, engine, "analyze", dir, "Bass", "--target", "-20"); err != nil {
+		t.Fatal(err)
+	}
+	if len(engine.got) != 1 || engine.got[0].Tracks[0] != "Bass" || engine.got[0].Files[0] != dir || engine.got[0].TargetDBFS != -20 {
+		t.Errorf("request = %+v", engine.got)
+	}
+	if _, err := execute(t, &fakeEngine{}, "analyze", dir, "--target", "0"); err == nil {
+		t.Error("target 0 dBFS accepted")
+	}
+}
+
+func TestMultiLineAnswersPrintLineByLine(t *testing.T) {
+	engine := &fakeEngine{res: daw.Result{Message: "Measured 2 stems:\nBass\x1b[31m: average -40 dBFS.\nLoops is silent."}}
+	out, err := execute(t, engine, "gainstage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "Measured 2 stems:\nBass?[31m: average -40 dBFS.\nLoops is silent.\n" {
+		t.Errorf("out = %q", out)
 	}
 }

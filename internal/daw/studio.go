@@ -45,6 +45,11 @@ type Request struct {
 	Files []string `json:"files,omitempty"`
 	Onto  string   `json:"onto,omitempty"`
 	At    int      `json:"at,omitempty"`
+	// Tracks and Target are for analyze and gainstage: tracks to measure
+	// (none means every audio track) and the average level to aim for in
+	// dBFS (0 means DefaultTarget).
+	Tracks     []string `json:"tracks,omitempty"`
+	TargetDBFS float64  `json:"targetDBFS,omitempty"`
 }
 
 // Result is what happened, in one line, plus structured detail for --json.
@@ -86,6 +91,9 @@ const MaxPlay = 60 * time.Second
 type Studio struct {
 	session *Session
 	schema  *dawschema.Catalog
+	// stemDirs are folders where stems were found through Spotlight, tried
+	// first for the next stem (one Spotlight query takes about a second).
+	stemDirs stemDirs
 }
 
 // NewStudio wraps a session with the parameter catalog.
@@ -141,6 +149,12 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return st.audio(ctx, req)
 	case "fader":
 		return st.fader(ctx, req)
+	case "trim":
+		return st.trim(ctx, req)
+	case "analyze":
+		return st.analyze(ctx, req)
+	case "gainstage":
+		return st.gainStage(ctx, req)
 	case "import":
 		return st.importAudio(ctx, req)
 	case "new_song":

@@ -61,6 +61,23 @@ type faderIn struct {
 	Change float64  `json:"change,omitempty" jsonschema:"move the fader by this many dB instead: -3 to bring it down 3 dB, 2 to raise it 2 dB"`
 }
 
+type trimIn struct {
+	Track  string   `json:"track" jsonschema:"track name (Bass), number (2) or path"`
+	DB     *float64 `json:"db,omitempty" jsonschema:"set the input trim to this many dB, -24 to +24 (0 is no change to the stem's level); leave empty to read it"`
+	Change float64  `json:"change,omitempty" jsonschema:"move the trim by this many dB instead: 20 to raise a stem exported 20 dB too quiet, -3 to lower it"`
+}
+
+type analyzeIn struct {
+	Paths  []string `json:"paths,omitempty" jsonschema:"full paths of WAV or AIFF stems or of a folder of stems (~ works); measured on this Mac without Studio Pro"`
+	Tracks []string `json:"tracks,omitempty" jsonschema:"track names: measures the stem imported onto each track; leave paths and tracks empty to measure every audio track in the song"`
+	Target float64  `json:"target,omitempty" jsonschema:"average level to suggest trims for, in dBFS (default -18)"`
+}
+
+type gainStageIn struct {
+	Tracks []string `json:"tracks,omitempty" jsonschema:"track names to gain-stage; empty for every audio track"`
+	Target float64  `json:"target,omitempty" jsonschema:"average level to bring each stem to, in dBFS (default -18)"`
+}
+
 type audioIn struct {
 	Edit    string  `json:"edit" jsonschema:"one of: fade-out, fade-in, split, trim-start, trim-end, crossfade, quantize"`
 	Track   string  `json:"track" jsonschema:"track name (Guitar), number (2) or path"`
@@ -120,13 +137,26 @@ type valuesIn struct {
 	Prefix string `json:"prefix,omitempty" jsonschema:"path prefix, e.g. mixer/channel/ch1 or transport; empty returns the whole song"`
 }
 
+// instructions tell Claude how to use the tools, including the mix
+// engineer's workflow (Claude Desktop has no skills, so it lives here too;
+// skills/ucdaw/mixing.md is the full version).
+const instructions = "Drives the Fender Studio Pro song that is open on this network, the way the Studio Pro Remote app does. " +
+	"Every change is read back from Studio Pro before the tool answers, and each answer is one line to pass on to the musician as is. " +
+	"Start with get_song to see tracks, tempo and arranger sections. add_track and add_insert build a track with its plug-ins; section edits the arrangement. For anything without its own tool (undo, zoom, editing), " +
+	"find the command with list_commands and run it with run_command; most song changes undo with run_command Edit / Undo.\n\n" +
+	"Mixing: you are the mix engineer for a musician who cannot measure. " +
+	"Always measure before touching a level: analyze_audio gives each stem's average (RMS over active audio), peak, LUFS, silence and clipping, and the input trim it needs. " +
+	"Never guess fader cuts, never normalize to peak, and never reset or rebalance the musician's faders without asking. " +
+	"A stem exported far too quiet or loud is fixed with trim (input gain, -24..+24 dB), not the fader; gain_stage sets every trim so stems average about -18 dBFS (0 VU) and leaves faders alone, so ask before running it on a mix they have balanced. " +
+	"Then balance with fader from the foundation: drums, bass against the kick, the vocal or lead, then the rest. " +
+	"Turn ear notes into small dB moves: \"a touch\" 1-2 dB, \"a bit\" 3 dB, \"a lot\" 6 dB; one change at a time, then ask how it sounds. " +
+	"Report every change with its exact numbers (pass the tool's line on). Flag a silent or clipped stem as a broken export to re-export. " +
+	"Compare with the original recording at matched LUFS, and judge bass on headphones or real speakers, not laptop speakers."
+
 // NewServer builds the MCP server.
 func NewServer(engine EngineFunc, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "studio-pro-ucnet", Title: "Studio Pro (UCNET)", Version: version}, &mcp.ServerOptions{
-		Instructions: "Drives the Fender Studio Pro song that is open on this network, the way the Studio Pro Remote app does. " +
-			"Every change is read back from Studio Pro before the tool answers, and each answer is one line to pass on to the musician as is. " +
-			"Start with get_song to see tracks, tempo and arranger sections. add_track and add_insert build a track with its plug-ins; section edits the arrangement. For anything without its own tool (undo, zoom, editing), " +
-			"find the command with list_commands and run it with run_command; most song changes undo with run_command Edit / Undo.",
+		Instructions: instructions,
 	})
 	call := func(ctx context.Context, req daw.Request, withData bool) (*mcp.CallToolResult, any, error) {
 		return run(ctx, engine, req, withData)
@@ -309,7 +339,8 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "fader",
 		Description: "Read or set a track's fader in dB, on Studio Pro's own fader curve (matches the console: 0 dB unity, +10 dB top). " +
-			"\"Bring the pad down 3 dB\" is change -3. Read back from Studio Pro: \"Pad at -3 dB (was 0 dB).\" Mute and solo are set_param .../mute and .../solo.",
+			"\"Bring the pad down 3 dB\" is change -3. Read back from Studio Pro: \"Pad at -3 dB (was 0 dB).\" Mute and solo are set_param .../mute and .../solo. " +
+			"The fader is for the balance and the musician's notes (\"a touch\" 1-2 dB, \"a bit\" 3, \"a lot\" 6); measure with analyze_audio first, and fix a stem exported far off with trim.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in faderIn) (*mcp.CallToolResult, any, error) {
 		req := daw.Request{Op: "fader", Path: in.Track}
 		switch {
@@ -321,6 +352,64 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			req.Action, req.Value = "set", strconv.FormatFloat(*in.DB, 'f', -1, 64)
 		}
 		return call(ctx, req, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "trim",
+		Description: "Read or set a track's input trim (Studio Pro's Input Gain, before plug-ins and fader) in dB, -24 to +24. " +
+			"Use it when analyze_audio shows a stem exported far too quiet or loud (\"bass averages -47 dBFS, drums -23.7\": raise the bass trim about 20 dB); " +
+			"keep the fader for the balance. Read back: \"Bass trim +20 dB (was 0 dB).\"",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in trimIn) (*mcp.CallToolResult, any, error) {
+		req := daw.Request{Op: "trim", Path: in.Track}
+		switch {
+		case in.Change > 0:
+			req.Action, req.Value = "up", strconv.FormatFloat(in.Change, 'f', -1, 64)
+		case in.Change < 0:
+			req.Action, req.Value = "down", strconv.FormatFloat(-in.Change, 'f', -1, 64)
+		case in.DB != nil:
+			req.Action, req.Value = "set", strconv.FormatFloat(*in.DB, 'f', -1, 64)
+		}
+		return call(ctx, req, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "analyze_audio",
+		Description: "Measure stems before touching any level: per stem the average level (RMS over its active audio, silence below -60 dBFS left out), peak, " +
+			"integrated loudness (LUFS, ITU-R BS.1770), active time, whether it is an empty export or clips, and the input trim that brings it to the -18 dBFS target. " +
+			"Give paths (files or a folder, measured on this Mac without Studio Pro), track names (the stem imported onto each track), or nothing (every audio track in the song). " +
+			"Reading only. Returns one line per stem to pass on, e.g. \"Loops is silent: an empty export.\"",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in analyzeIn) (*mcp.CallToolResult, any, error) {
+		var paths []string
+		if len(in.Paths) > 0 {
+			var err error
+			if paths, err = daw.ImportPaths(in.Paths); err != nil {
+				return failure(err), nil, nil
+			}
+		}
+		if len(paths) > 0 && len(in.Tracks) == 0 {
+			target := in.Target
+			if target == 0 {
+				target = daw.DefaultTarget
+			}
+			if err := daw.CheckTarget(target); err != nil {
+				return failure(err), nil, nil
+			}
+			res, err := daw.Analyze(ctx, paths, target)
+			if err != nil {
+				return failure(err), nil, nil
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: res.Message}}}, nil, nil
+		}
+		return call(ctx, daw.Request{Op: "analyze", Files: paths, Tracks: in.Tracks, TargetDBFS: in.Target}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "gain_stage",
+		Description: "Gain-stage the song: measure the stem on each audio track (or the named ones) and set each track's input trim so it averages the target (default -18 dBFS), " +
+			"the way an engineer starts a mix. Faders, mutes and pans are not touched, so the musician's balance stays; still ask before running it on a mix they have balanced. " +
+			"Silent stems and tracks without a stem are left alone and named. Returns one line per track with the trim before and after.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gainStageIn) (*mcp.CallToolResult, any, error) {
+		return call(ctx, daw.Request{Op: "gainstage", Tracks: in.Tracks, TargetDBFS: in.Target}, false)
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

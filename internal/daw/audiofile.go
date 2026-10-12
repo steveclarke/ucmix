@@ -20,6 +20,14 @@ type AudioFile struct {
 	SampleRate float64 `json:"sampleRate"`
 	Bits       int     `json:"bits"`
 	Frames     uint64  `json:"frames"`
+
+	// Where the samples are and how they are stored, for analysis. Not
+	// part of the JSON: a musician never needs them.
+	dataOffset int64  // first byte of the first frame
+	dataBytes  int64  // bytes of sample data the file really holds
+	blockAlign int    // bytes per frame
+	encoding   string // "int", "uint8" (8-bit WAV), "float", or "" (unknown)
+	bigEndian  bool
 }
 
 // Format is "mono" or "stereo", the audio track the file belongs on.
@@ -89,13 +97,13 @@ func parseAudioHeader(r io.ReadSeeker, size int64) (AudioFile, error) {
 }
 
 // walkChunks walks chunk headers from just after the 12-byte file header,
-// calling fn with each chunk's id, its declared size, and a reader limited to
-// the chunk's first maxFmtChunk bytes. Chunks are padded to an even length in
+// calling fn with each chunk's id, its declared size, the offset of its
+// body, and a reader limited to the chunk's first maxFmtChunk bytes. Chunks are padded to an even length in
 // both formats. The walk never trusts a size: at most maxChunks headers are
 // read, every step moves forward by at least 8 bytes, and a chunk that claims
 // to run past the end of the file is malformed, except the audio itself
 // (data, SSND), which a file still being written may cut short.
-func walkChunks(r io.ReadSeeker, size int64, order binary.ByteOrder, fn func(id string, n uint32, body io.Reader) (stop bool, err error)) error {
+func walkChunks(r io.ReadSeeker, size int64, order binary.ByteOrder, fn func(id string, n uint32, at int64, body io.Reader) (stop bool, err error)) error {
 	pos := int64(12)
 	for i := 0; i < maxChunks && pos+8 <= size; i++ {
 		if _, err := r.Seek(pos, io.SeekStart); err != nil {
@@ -110,7 +118,7 @@ func walkChunks(r io.ReadSeeker, size int64, order binary.ByteOrder, fn func(id 
 		if end > size+1 && id != "data" && id != "SSND" {
 			return errNotAudio
 		}
-		stop, err := fn(id, n, io.LimitReader(r, min(int64(n), maxFmtChunk)))
+		stop, err := fn(id, n, pos+8, io.LimitReader(r, min(int64(n), maxFmtChunk)))
 		if err != nil || stop {
 			return err
 		}
@@ -125,10 +133,11 @@ func walkChunks(r io.ReadSeeker, size int64, order binary.ByteOrder, fn func(id 
 func parseWAV(r io.ReadSeeker, size int64, rf64 bool) (AudioFile, error) {
 	a := AudioFile{Container: "WAV"}
 	var blockAlign uint16
+	var formatTag uint16
 	var dataSize uint64
 	var ds64Data uint64
 	haveFmt, haveData := false, false
-	err := walkChunks(r, size, binary.LittleEndian, func(id string, n uint32, body io.Reader) (bool, error) {
+	err := walkChunks(r, size, binary.LittleEndian, func(id string, n uint32, at int64, body io.Reader) (bool, error) {
 		switch id {
 		case "ds64":
 			if n < 16 || n > maxFmtChunk {
@@ -143,20 +152,27 @@ func parseWAV(r io.ReadSeeker, size int64, rf64 bool) (AudioFile, error) {
 			if n < 16 || n > maxFmtChunk {
 				return false, errNotAudio
 			}
-			var b [16]byte
-			if _, err := io.ReadFull(body, b[:]); err != nil {
+			b := make([]byte, min(int(n), 26))
+			if _, err := io.ReadFull(body, b); err != nil {
 				return false, err
 			}
+			formatTag = binary.LittleEndian.Uint16(b[0:2])
 			a.Channels = int(binary.LittleEndian.Uint16(b[2:4]))
 			a.SampleRate = float64(binary.LittleEndian.Uint32(b[4:8]))
 			blockAlign = binary.LittleEndian.Uint16(b[12:14])
 			a.Bits = int(binary.LittleEndian.Uint16(b[14:16]))
+			// WAVE_FORMAT_EXTENSIBLE: the real format is the first two
+			// bytes of the SubFormat GUID, 24 bytes into the chunk.
+			if formatTag == 0xFFFE && len(b) >= 26 {
+				formatTag = binary.LittleEndian.Uint16(b[24:26])
+			}
 			haveFmt = true
 		case "data":
 			dataSize = uint64(n)
 			if rf64 && n == math.MaxUint32 {
 				dataSize = ds64Data
 			}
+			a.dataOffset = at
 			haveData = true
 		}
 		return haveFmt && haveData, nil
@@ -168,32 +184,93 @@ func parseWAV(r io.ReadSeeker, size int64, rf64 bool) (AudioFile, error) {
 		return AudioFile{}, errNotAudio
 	}
 	a.Frames = dataSize / uint64(blockAlign)
+	a.blockAlign = int(blockAlign)
+	a.dataBytes = dataBytes(a.dataOffset, dataSize, size)
+	switch {
+	case formatTag == 1 && a.Bits <= 8:
+		a.encoding = "uint8"
+	case formatTag == 1:
+		a.encoding = "int"
+	case formatTag == 3:
+		a.encoding = "float"
+	}
 	return a, checkAudio(a)
 }
 
+// dataBytes is how much sample data a file really holds: what its header
+// declares, cut to the end of the file (a file still being written, or cut
+// short, declares more than it has).
+func dataBytes(offset int64, declared uint64, size int64) int64 {
+	avail := size - offset
+	if avail < 0 {
+		return 0
+	}
+	if declared > uint64(avail) {
+		return avail
+	}
+	return int64(declared)
+}
+
 func parseAIFF(r io.ReadSeeker, size int64) (AudioFile, error) {
-	a := AudioFile{Container: "AIFF"}
-	found := false
-	err := walkChunks(r, size, binary.BigEndian, func(id string, n uint32, body io.Reader) (bool, error) {
-		if id != "COMM" {
-			return false, nil
+	a := AudioFile{Container: "AIFF", bigEndian: true, encoding: "int"}
+	haveComm, haveData := false, false
+	var ssndSize uint64
+	_ = walkChunks(r, size, binary.BigEndian, func(id string, n uint32, at int64, body io.Reader) (bool, error) {
+		switch id {
+		case "COMM":
+			if n < 18 || n > maxFmtChunk {
+				return false, errNotAudio
+			}
+			b := make([]byte, min(int(n), 22))
+			if _, err := io.ReadFull(body, b); err != nil {
+				return false, err
+			}
+			a.Channels = int(binary.BigEndian.Uint16(b[0:2]))
+			a.Frames = uint64(binary.BigEndian.Uint32(b[2:6]))
+			a.Bits = int(binary.BigEndian.Uint16(b[6:8]))
+			a.SampleRate = extended80(b[8:18])
+			// AIFC names its encoding after the sample rate.
+			if len(b) >= 22 {
+				switch string(b[18:22]) {
+				case "NONE", "twos":
+				case "sowt":
+					a.bigEndian = false
+				case "fl32", "FL32", "fl64", "FL64":
+					a.encoding = "float"
+				default:
+					a.encoding = ""
+				}
+			}
+			haveComm = true
+		case "SSND":
+			// SSND starts with an offset to the first frame and a block size.
+			var b [8]byte
+			if n < 8 {
+				return false, errNotAudio
+			}
+			if _, err := io.ReadFull(body, b[:]); err != nil {
+				return false, err
+			}
+			skip := int64(binary.BigEndian.Uint32(b[0:4]))
+			if skip > int64(n)-8 {
+				return false, errNotAudio
+			}
+			a.dataOffset = at + 8 + skip
+			ssndSize = uint64(int64(n) - 8 - skip)
+			haveData = true
 		}
-		if n < 18 || n > maxFmtChunk {
-			return false, errNotAudio
-		}
-		var b [18]byte
-		if _, err := io.ReadFull(body, b[:]); err != nil {
-			return false, err
-		}
-		a.Channels = int(binary.BigEndian.Uint16(b[0:2]))
-		a.Frames = uint64(binary.BigEndian.Uint32(b[2:6]))
-		a.Bits = int(binary.BigEndian.Uint16(b[6:8]))
-		a.SampleRate = extended80(b[8:18])
-		found = true
-		return true, nil
+		return haveComm && haveData, nil
 	})
-	if err != nil || !found {
+	// The walk ends in an error when it runs out of chunks before finding
+	// both; an AIFF whose COMM was read still describes itself (only
+	// analysis needs the sound data).
+	if !haveComm {
 		return AudioFile{}, errNotAudio
+	}
+	bytesPer := (a.Bits + 7) / 8
+	a.blockAlign = a.Channels * bytesPer
+	if haveData {
+		a.dataBytes = dataBytes(a.dataOffset, ssndSize, size)
 	}
 	return a, checkAudio(a)
 }
