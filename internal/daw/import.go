@@ -55,6 +55,7 @@ var (
 	importSettle  = 2 * time.Second
 	landingSettle = 300 * time.Millisecond
 	renameDelay   = 1500 * time.Millisecond
+	renameGap     = 500 * time.Millisecond
 	pollEvery     = 100 * time.Millisecond
 )
 
@@ -247,17 +248,30 @@ func (st *Studio) importOne(ctx context.Context, f AudioFile, name string, onto 
 // nameClips gives each clip its track's name (Studio Pro names it after the
 // file). It runs after the last import has had renameDelay to settle: a
 // rename sent straight after an import was ignored live, while the same
-// rename a second later worked. Select All on Tracks first, so a rename can
-// only touch the one clip on that new track.
+// rename a second later worked. Each rename clears the selection first
+// (Deselect All): the clip an import leaves selected otherwise took the
+// previous track's name live. Then Select All on Tracks on the one new
+// track, so a rename can only touch its clip.
 func (st *Studio) nameClips(ctx context.Context, done []imported) error {
 	if err := pause(ctx, renameDelay); err != nil {
 		return err
 	}
 	for i := range done {
-		if err := st.selectTrackEvents(ctx, Channel{Path: done[i].Channel, Name: done[i].Track}); err != nil {
+		if err := st.session.SetNum(ctx, done[i].Channel+"/selected", 1); err != nil {
+			return st.unconfirmed(err, "Selecting "+done[i].Track)
+		}
+		if err := st.invokeAll(ctx,
+			step{"Edit", "Deselect All", nil},
+			step{"Edit", "Select All on Tracks", nil},
+			step{"Event", "Rename Events", map[string]string{"New Name": done[i].Track}},
+		); err != nil {
 			return err
 		}
-		if err := st.invokeAll(ctx, step{"Event", "Rename Events", map[string]string{"New Name": done[i].Track}}); err != nil {
+		// Studio Pro applies a track selection at once but runs commands
+		// a moment later; without this pause the next track's selection
+		// overtook the rename and each clip took the previous track's
+		// name (seen live).
+		if err := pause(ctx, renameGap); err != nil {
 			return err
 		}
 		done[i].Clip = done[i].Track

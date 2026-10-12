@@ -71,12 +71,12 @@ func newImportRig(t *testing.T) *importRig {
 	st.session.Model().mutate(func(rec func(string)) { st.session.Model().setStr("document/title", "Demo", rec) })
 
 	origOpen, origSongs, origLocal := openInStudioPro, songsDir, isLocalAddress
-	origSettle, origLanding, origPoll, origRename := importSettle, landingSettle, pollEvery, renameDelay
+	origSettle, origLanding, origPoll, origRename, origGap := importSettle, landingSettle, pollEvery, renameDelay, renameGap
 	t.Cleanup(func() {
 		openInStudioPro, songsDir, isLocalAddress = origOpen, origSongs, origLocal
-		importSettle, landingSettle, pollEvery, renameDelay = origSettle, origLanding, origPoll, origRename
+		importSettle, landingSettle, pollEvery, renameDelay, renameGap = origSettle, origLanding, origPoll, origRename, origGap
 	})
-	importSettle, landingSettle, pollEvery, renameDelay = 50*time.Millisecond, time.Millisecond, 5*time.Millisecond, time.Millisecond
+	importSettle, landingSettle, pollEvery, renameDelay, renameGap = 50*time.Millisecond, time.Millisecond, 5*time.Millisecond, time.Millisecond, time.Millisecond
 	songsDir = func() string { return songs }
 	openInStudioPro = func(_ context.Context, path string) error {
 		r.mu.Lock()
@@ -129,7 +129,7 @@ func TestImportFolderMakesOneNamedTrackPerStemAtBarOne(t *testing.T) {
 		t.Errorf("message =\n%q\nwant\n%q", res.Message, want)
 	}
 	log := strings.Join(r.log, ", ")
-	rename := ", Edit>Select All on Tracks, Event>Rename Events"
+	rename := ", Edit>Deselect All, Edit>Select All on Tracks, Event>Rename Events"
 	wantLog := "Track>Add Audio Track (mono), Transport>Return to Zero, open 01_Kick_Final.wav, " +
 		"Track>Add Audio Track (stereo), Transport>Return to Zero, open 02 Bass DI.wav, " +
 		"Track>Add Audio Track (stereo), Transport>Return to Zero, open 03-Pad (Stereo) v2.wav, " +

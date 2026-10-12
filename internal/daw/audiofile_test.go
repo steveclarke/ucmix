@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // wavBytes builds a WAV header (and silent data) with extra chunks before
@@ -184,5 +185,41 @@ func TestCollectAudioBoundsTheBatch(t *testing.T) {
 	}
 	if _, _, err := collectAudio([]string{dir}); err == nil {
 		t.Error("no limit")
+	}
+}
+
+func TestReadAudioFileBoundsHostileHeaders(t *testing.T) {
+	dir := t.TempDir()
+	riff := func(chunks ...[]byte) []byte {
+		body := []byte("WAVE")
+		for _, c := range chunks {
+			body = append(body, c...)
+		}
+		return append(append([]byte("RIFF"), binary.LittleEndian.AppendUint32(nil, uint32(len(body)))...), body...)
+	}
+	chunk := func(id string, n uint32, data []byte) []byte {
+		return append(append([]byte(id), binary.LittleEndian.AppendUint32(nil, n)...), data...)
+	}
+	var many [][]byte
+	for i := 0; i < maxChunks+10; i++ {
+		many = append(many, chunk("junk", 0, nil))
+	}
+	good := wavBytes(1, 48000, 16, 10, false)
+	cases := map[string][]byte{
+		"oversized-fmt.wav":   riff(chunk("fmt ", 0xFFFFFFF0, make([]byte, 16))),
+		"chunk-past-end.wav":  riff(chunk("LIST", 1<<20, make([]byte, 32))),
+		"endless-chunks.wav":  riff(many...),
+		"truncated-head.wav":  good[:10],
+		"truncated-chunk.wav": good[:12+5],
+		"huge-ds64.wav":       append([]byte("RF64\xff\xff\xff\xffWAVE"), chunk("ds64", 0xFFFFFFFF, nil)...),
+	}
+	for name, data := range cases {
+		start := time.Now()
+		if _, err := ReadAudioFile(writeFile(t, dir, name, data)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if time.Since(start) > time.Second {
+			t.Errorf("%s: took %s", name, time.Since(start))
+		}
 	}
 }

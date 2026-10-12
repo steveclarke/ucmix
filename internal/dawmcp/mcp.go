@@ -223,7 +223,7 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			"to match it, named for a musician (01_Kick_Final.wav becomes Kick), with the clip at bar 1, so the stems line up ready to mix. " +
 			"Files go in one at a time; other files in a folder are skipped and named. Studio Pro does not report clips to remotes: " +
 			"the answer confirms the tracks and says clip placement was not read back, so pass that on. Only for Studio Pro on this Mac. " +
-			"Undo takes two run_command Edit / Undo steps per stem (the clip, then the track).",
+			"Undo is about three run_command Edit / Undo presses per stem; check get_song until the tracks are gone.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in importIn) (*mcp.CallToolResult, any, error) {
 		paths, err := daw.ImportPaths(in.Paths)
 		if err != nil {

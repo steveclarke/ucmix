@@ -99,7 +99,8 @@ ucdaw knows Studio Pro read each file from the waveform it draws into the song's
 instead. Pass the "not read back" part on to the musician.
 
 - Studio Pro must be on this Mac: ucdaw hands it each file with `open`.
-- Undo is three `Edit > Undo` steps per stem (clip name, clip, track).
+- Undo is about three `Edit > Undo` presses per stem; press it until `get_song`
+  no longer lists the tracks.
 - A conversion question from Studio Pro is accepted (the musician wants the
   stems in); any other dialog is cancelled and reported.
 

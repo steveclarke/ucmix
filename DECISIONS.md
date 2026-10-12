@@ -389,7 +389,7 @@ SAY  Everything is set up except the clean guitar sound. Guitar Rig 7 is on the 
 
 ## The landing signal
 
-- **UCNET carries nothing for an import.** Three captures (`ucdaw state record`) around imports: after the new track's values, the only frames were `ZM {"id": "BeginProgress"}` / `ZM {"id": "EndProgress"}`. The third capture ran Return to Zero, waited 3 s, then imported: the pair arrived right after Return to Zero, two seconds before the import, and nothing came with the import itself. The pair belongs to Return to Zero.
+- **UCNET carries nothing for an import.** Three captures (`ucdaw state record`) around imports: after the new track's values, the only frames were `ZM {"id": "BeginProgress"}` / `ZM {"id": "EndProgress"}`. The third capture ran Return to Zero, waited 3 s, then imported: the pair arrived right after Return to Zero, three seconds before the import, and nothing came with the import itself. The pair belongs to Return to Zero.
 
 ```
 cap3 (ms since subscribe): 4227 ZM BeginProgress / 4227 ZM EndProgress   <- rtz at ~4.0 s
@@ -403,7 +403,7 @@ cap3 (ms since subscribe): 4227 ZM BeginProgress / 4227 ZM EndProgress   <- rtz 
 ## Clip names
 
 - A clip is named after its file ("02 Bass DI"). `Event / Rename Events {"New Name": "Bass DI"}` renamed it (checked on screen). Sent 0.3 s after the waveform appeared, the rename was ignored twice (both AIFF files; screenshots every 300 ms showed the clip in place but never renamed); the same commands sent a few seconds later worked. So ucdaw renames all clips at the end of a batch, 1.5 s after the last import, each after `Edit / Select All on Tracks` on its own new track, so the rename cannot touch anything else. With `--onto` clips keep their file names.
-- Undo, counted live: three steps per stem (clip name, clip, track). `Ran Edit > Undo: removed Lead Vox.` comes on every third press.
+- Undo, counted live: about three presses per stem (a batch of four took 12; a batch of three took 7, the track removed on every second or third press). The safe instruction is to press Undo until `get_song` no longer lists the tracks.
 
 ## Formats and dialogs
 
@@ -427,4 +427,13 @@ $ ucdaw state
 - Window capture after the run: four tracks Kick, Bass DI, Pad, Lead Vox, each clip starting on the bar-1 line and named like its track. Left in the song for Steve.
 - My mistake during the run: a stray second `ucdaw import … &` in the same shell line was not stopped by `kill %1` and imported the four stems again onto four more tracks. Undone with 12 Undo presses (three per stem, as above), channel count read back 15 → 11.
 - Kick's clip on screen is 4 s long though the regenerated file is 4.5 s. The stems were regenerated in place (same names) after the development imports of the 4 s versions; Studio Pro seems to keep a file's length from earlier in the session. Real stems are not rewritten under the same name mid-session; noted, not chased.
-- `just test`: 764 tests pass; `golangci-lint`: 0 issues on the ucdaw packages.
+- `just test`: all pass; `golangci-lint`: 0 issues on the ucdaw packages.
+
+## Hardening and follow-up checks (09:15–09:30 NDT)
+
+- **Header parsing, after an automated security review flagged a denial-of-service risk.** The walk already used seeks (no audio read) and at most 256 chunk headers. Now also: each chunk body is read through `io.LimitReader` capped at 4 KB, a chunk that claims to run past the end of the file is malformed (except the audio itself, `data`/`SSND`, which a file still being written may cut short), every step must move the offset forward, and a walk that ends without the format chunk is an error. New test `TestReadAudioFileBoundsHostileHeaders`: oversized `fmt `, a chunk past the end, 266 zero-length chunks, truncated headers, an `RF64` with a huge `ds64`; each fails in well under a second. Fuzzed again 15 s, no panic.
+- **A 52 MB stem** (3 minutes, stereo 48 kHz 24-bit) with a small one after it: the waveform file appeared 0.26 s after `open` and was written whole (its size never changed across 100 polls 50 ms apart); the small stem landed on its own track. Checked on screen.
+- **Clip names went to the wrong clip in that run:** the small stem's clip was named "Big Organ". Studio Pro applies a track selection (`PV selected`) at once but runs commands a moment later, so the next track's selection overtook the previous rename. Fixed: each rename is Deselect All, Select All on Tracks, Rename, then a 0.5 s pause before the next track is selected. Re-run with three stems (52 MB WAV, small WAV, AIFF): every clip named after its own track, on screen.
+- **`--onto` and `--at`, live:** `ucdaw import "Small Shaker.wav" --onto "Probe a" --at 3` → `Imported Small Shaker.wav onto Probe a at bar 3. …`; on screen the clip starts on the bar-3 line of Probe a and keeps its file name. One Undo removes it.
+- All these test tracks were undone (channel count read back 14 → 11); the four stems from the main test stay.
+- Playback was running when I took the last window capture (position 1.3.2, about 2 s in); `ucdaw` had not sent Play (the commands just before were eight Undos, a parameter read, Return to Zero and `state`, which reported stopped). Stopped it at once; `transport/start: off` read back. Return to Zero alone, tried again, did not start playback. Cause unknown; possibly Steve at the screen.

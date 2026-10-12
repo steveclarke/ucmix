@@ -25,7 +25,7 @@ func newImportCmd(o *options) *cobra.Command {
 			"Studio Pro does not report clips to remotes: tracks are read back, clip placement\n" +
 			"is not. ucdaw watches for the waveform Studio Pro draws for each new file, so it\n" +
 			"knows each file was read before importing the next. Works only with Studio Pro on\n" +
-			"this Mac. Undo takes two steps per stem (the clip, then the track).",
+			"this Mac. Undo is about three presses per stem.",
 		Example: "  ucdaw import ~/Music/stems\n  ucdaw import Vox.wav --onto Vox --at 17",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
