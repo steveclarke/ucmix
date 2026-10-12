@@ -3,6 +3,7 @@ package daw
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
 	"sort"
 	"strconv"
@@ -47,6 +48,16 @@ type fakeArranger struct {
 	rangeEnd   float64
 	log        []string
 	ignore     bool // a Studio Pro that does nothing
+	// deleteLast makes Delete Range remove the last section, not the
+	// selected one: the count comes out right, the arrangement does not.
+	deleteLast bool
+	// pasteAs makes Paste insert a section with this name instead of the
+	// one copied.
+	pasteAs string
+	// noShift makes an insert leave later sections where they were.
+	noShift bool
+	// renameFirst makes Rename Events rename section 1 as well.
+	renameFirst bool
 }
 
 func (a *fakeArranger) frame() []proto.Frame {
@@ -56,7 +67,7 @@ func (a *fakeArranger) frame() []proto.Frame {
 func (a *fakeArranger) insert(at float64, e Event) {
 	length := e.End - e.Start
 	for i := range a.sections {
-		if a.sections[i].Start >= at-1e-6 {
+		if !a.noShift && a.sections[i].Start >= at-1e-6 {
 			a.sections[i].Start += length
 			a.sections[i].End += length
 		}
@@ -95,10 +106,17 @@ func (a *fakeArranger) invoke(category, name string, args map[string]string) []p
 		}
 	case "Edit|Paste":
 		if a.clip != nil {
-			a.insert(a.cursor, *a.clip)
+			e := *a.clip
+			if a.pasteAs != "" {
+				e.Name = a.pasteAs
+			}
+			a.insert(a.cursor, e)
 			return a.frame()
 		}
 	case "Arranger|Delete Range":
+		if a.deleteLast && a.selected > 0 {
+			a.selected = len(a.sections)
+		}
 		if a.selected > 0 {
 			s := a.sections[a.selected-1]
 			a.sections = append(a.sections[:a.selected-1], a.sections[a.selected:]...)
@@ -112,6 +130,9 @@ func (a *fakeArranger) invoke(category, name string, args map[string]string) []p
 			return a.frame()
 		}
 	case "Event|Rename Events":
+		if a.renameFirst && len(a.sections) > 0 {
+			a.sections[0].Name = args["New Name"]
+		}
 		if a.selected > 0 {
 			a.sections[a.selected-1].Name = args["New Name"]
 			return a.frame()
@@ -300,6 +321,83 @@ func TestSectionUnconfirmedSaysSo(t *testing.T) {
 	arr.ignore = true
 	_, err := st.Do(context.Background(), Request{Op: "section", Action: "duplicate", Section: "Verse"})
 	if err == nil || !strings.Contains(err.Error(), "arranger did not show it; sections now: Verse bar 1") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func shortSectionWait(t *testing.T) {
+	t.Helper()
+	orig := sectionWait
+	sectionWait = 50 * time.Millisecond
+	t.Cleanup(func() { sectionWait = orig })
+}
+
+// An edit is confirmed by the whole arranger list, names and starts, not by
+// the number of sections alone.
+func TestSectionDeleteChecksTheWholeList(t *testing.T) {
+	st, arr := newArrangerStudio(t, "Verse", "Chorus", "Bridge")
+	shortSectionWait(t)
+	arr.deleteLast = true
+	_, err := st.Do(context.Background(), Request{Op: "section", Action: "delete", Section: "Chorus"})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "sections now: Verse bar 1, Chorus bar 5") || !strings.Contains(p.Hint, "Undo") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestSectionMoveChecksTheWholeList(t *testing.T) {
+	st, arr := newArrangerStudio(t, "Verse", "Chorus", "Bridge")
+	shortSectionWait(t)
+	arr.deleteLast = true
+	_, err := st.Do(context.Background(), Request{Op: "section", Action: "move", Section: "Verse", Where: "after", Target: "Chorus"})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "sections now:") || !strings.Contains(p.Hint, "Undo") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Move checks the copy landed, with the right name, before it deletes the
+// original; otherwise the original would be lost.
+func TestSectionMoveKeepsTheOriginalWhenTheCopyIsWrong(t *testing.T) {
+	st, arr := newArrangerStudio(t, "Verse", "Chorus", "Bridge")
+	shortSectionWait(t)
+	arr.pasteAs = "Chorus"
+	_, err := st.Do(context.Background(), Request{Op: "section", Action: "move", Section: "Verse", Where: "after", Target: "Chorus"})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "left in place") {
+		t.Errorf("err = %v", err)
+	}
+	for _, c := range arr.log {
+		if c == "Arranger>Delete Range" {
+			t.Fatalf("deleted the original: %v", arr.log)
+		}
+	}
+	if s := sectionNamesOf(st); !strings.HasPrefix(s, "Verse@1 ") {
+		t.Errorf("sections = %s", s)
+	}
+}
+
+func TestSectionCopyAndDuplicateCheckTheWholeList(t *testing.T) {
+	for _, req := range []Request{
+		{Op: "section", Action: "duplicate", Section: "Verse"},
+		{Op: "section", Action: "repeat", Section: "Verse", Target: "Chorus"},
+	} {
+		st, arr := newArrangerStudio(t, "Verse", "Chorus", "Bridge")
+		shortSectionWait(t)
+		arr.noShift = true
+		if _, err := st.Do(context.Background(), req); err == nil {
+			t.Errorf("%s: accepted a wrong arrangement; sections %s", req.Action, sectionNamesOf(st))
+		}
+	}
+}
+
+func TestSectionRenameChecksTheWholeList(t *testing.T) {
+	st, arr := newArrangerStudio(t, "Verse", "Chorus", "Bridge")
+	shortSectionWait(t)
+	arr.renameFirst = true
+	_, err := st.Do(context.Background(), Request{Op: "section", Action: "rename", Section: "Bridge", Name: "Outro"})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "sections now: Outro bar 1") {
 		t.Errorf("err = %v", err)
 	}
 }

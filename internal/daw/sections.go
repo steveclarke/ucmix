@@ -293,6 +293,98 @@ func (st *Studio) notConfirmed(err error, what string, after []Section) error {
 	return st.unconfirmed(err, what)
 }
 
+// pasted is the arranger list expected after a section named name, length
+// seconds long, goes in at a section boundary: sections from there on move
+// later by its length.
+func pasted(before []Section, name string, at, length float64) []Section {
+	out := make([]Section, 0, len(before)+1)
+	placed := false
+	for _, s := range before {
+		if !placed && s.Start >= at-0.01 {
+			out = append(out, Section{Name: name, Start: at, End: at + length})
+			placed = true
+		}
+		if s.Start >= at-0.01 {
+			s.Start += length
+			s.End += length
+		}
+		out = append(out, s)
+	}
+	if !placed {
+		out = append(out, Section{Name: name, Start: at, End: at + length})
+	}
+	return renumber(out)
+}
+
+// removed is the arranger list expected after section n (1-based) is
+// deleted with Delete Range: later sections move up to close the gap.
+func removed(before []Section, n int) []Section {
+	gone := before[n-1]
+	length := gone.End - gone.Start
+	out := make([]Section, 0, len(before)-1)
+	for i, s := range before {
+		if i == n-1 {
+			continue
+		}
+		if s.Start >= gone.End-0.01 {
+			s.Start -= length
+			s.End -= length
+		}
+		out = append(out, s)
+	}
+	return renumber(out)
+}
+
+func renumber(all []Section) []Section {
+	for i := range all {
+		all[i].Number = i + 1
+	}
+	return all
+}
+
+// sameSections compares two arranger lists by name and start, in order.
+func sameSections(want, got []Section) bool {
+	if len(want) != len(got) {
+		return false
+	}
+	for i := range want {
+		if want[i].Name != got[i].Name || !near(want[i].Start, got[i].Start) {
+			return false
+		}
+	}
+	return true
+}
+
+// expectSections waits until Studio Pro's arranger shows exactly want. If it
+// never does, the Problem says what Studio Pro shows instead: unchanged
+// (the edit did not happen) or something else (it went wrong).
+func (st *Studio) expectSections(ctx context.Context, what string, before, want []Section, hint string) ([]Section, error) {
+	after, err := st.waitSections(ctx, func(s []Section) bool { return sameSections(want, s) })
+	if err == nil {
+		return after, nil
+	}
+	if err == ErrUnconfirmed && !sameSections(before, after) {
+		return after, Problem{
+			Message: fmt.Sprintf("%s did not come out as expected; sections now: %s (expected %s)", what, orNone(sectionsSummary(after)), orNone(st.summaryOf(want))),
+			Hint:    hint,
+		}
+	}
+	return after, st.notConfirmed(err, what, after)
+}
+
+// summaryOf lists expected sections the way sectionsSummary lists real ones.
+func (st *Studio) summaryOf(all []Section) string {
+	spb := st.secondsPerBar()
+	out := make([]Section, len(all))
+	for i, s := range all {
+		out[i] = s
+		out[i].StartBar = barAt(s.Start, spb)
+	}
+	return sectionsSummary(out)
+}
+
+const undoOnce = "check Studio Pro; undo with: ucdaw command run \"Edit > Undo\""
+
 func orNone(s string) string {
 	if s == "" {
 		return "none"
@@ -320,11 +412,9 @@ func (st *Studio) duplicateSection(ctx context.Context, ref string) (Result, err
 	if err := st.invokeAll(ctx, gotoStep(src.Number), step{"Edit", "Duplicate", nil}); err != nil {
 		return Result{}, err
 	}
-	after, err := st.waitSections(ctx, func(s []Section) bool {
-		return len(s) == len(before)+1 && s[src.Number].Name == src.Name && near(s[src.Number].Start, src.End)
-	})
+	after, err := st.expectSections(ctx, "Duplicating "+src.label(), before, pasted(before, src.Name, src.End, src.End-src.Start), undoOnce)
 	if err != nil {
-		return Result{}, st.notConfirmed(err, "Duplicating "+src.label(), after)
+		return Result{}, err
 	}
 	copyAt := after[src.Number]
 	msg := fmt.Sprintf("Duplicated %s; the copy starts at %s", src.label(), copyAt.where())
@@ -382,19 +472,10 @@ func (st *Studio) copySection(ctx context.Context, ref, where, targetRef string)
 	if err := st.invokeAll(ctx, step{"Edit", "Paste", nil}); err != nil {
 		return Result{}, err
 	}
-	after, err := st.waitSections(ctx, func(s []Section) bool {
-		if len(s) != len(before)+1 {
-			return false
-		}
-		for _, x := range s {
-			if x.Name == src.Name && near(x.Start, at) {
-				return true
-			}
-		}
-		return false
-	})
+	what := fmt.Sprintf("Repeating %s %s %s", src.label(), where, target.label())
+	after, err := st.expectSections(ctx, what, before, pasted(before, src.Name, at, src.End-src.Start), undoOnce)
 	if err != nil {
-		return Result{}, st.notConfirmed(err, fmt.Sprintf("Repeating %s %s %s", src.label(), where, target.label()), after)
+		return Result{}, err
 	}
 	var placed Section
 	for _, x := range after {
@@ -455,27 +536,32 @@ func (st *Studio) moveSection(ctx context.Context, ref, where, targetRef string)
 		return Result{}, err
 	}
 	length := src.End - src.Start
-	pasted, err := st.waitSections(ctx, func(s []Section) bool { return len(s) == len(before)+1 })
+	// The copy must be in, with the source's name, where it was pasted, and
+	// the rest moved along, before the original goes: otherwise deleting it
+	// would lose the section.
+	wantPasted := pasted(before, src.Name, at, length)
+	after, err := st.waitSections(ctx, func(s []Section) bool { return sameSections(wantPasted, s) })
 	if err != nil {
-		return Result{}, st.notConfirmed(err, "Moving "+src.label(), pasted)
+		if err == ErrUnconfirmed && !sameSections(before, after) {
+			return Result{}, Problem{
+				Message: fmt.Sprintf("the copy of %s did not land as expected, so the original was left in place; sections now: %s", src.label(), sectionsSummary(after)),
+				Hint:    undoOnce,
+			}
+		}
+		return Result{}, st.notConfirmed(err, "Moving "+src.label(), after)
 	}
 	// The original moved along if the copy went in before it.
 	original := src.Number
 	if at <= src.Start {
 		original++
 	}
-	if original > len(pasted) || pasted[original-1].Name != src.Name {
-		return Result{}, Problem{
-			Message: fmt.Sprintf("the copy of %s went in, but the original was not where ucdaw expected, so it was left in place; sections now: %s", src.label(), sectionsSummary(pasted)),
-			Hint:    "undo with: ucdaw command run \"Edit > Undo\"",
-		}
-	}
 	if err := st.invokeAll(ctx, gotoStep(original), step{"Arranger", "Delete Range", nil}); err != nil {
 		return Result{}, err
 	}
-	after, err := st.waitSections(ctx, func(s []Section) bool { return len(s) == len(before) })
+	want := removed(wantPasted, original)
+	after, err = st.expectSections(ctx, "Removing the original "+src.label(), wantPasted, want, "check Studio Pro; undo twice with: ucdaw command run \"Edit > Undo\"")
 	if err != nil {
-		return Result{}, st.notConfirmed(err, "Removing the original "+src.label(), after)
+		return Result{}, err
 	}
 	newStart := at
 	if at > src.Start {
@@ -486,9 +572,6 @@ func (st *Studio) moveSection(ctx context.Context, ref, where, targetRef string)
 		if x.Name == src.Name && near(x.Start, newStart) {
 			moved = x
 		}
-	}
-	if moved.Number == 0 {
-		return Result{}, Problem{Message: fmt.Sprintf("Studio Pro's arranger does not show %s where ucdaw put it; sections now: %s", src.label(), sectionsSummary(after)), Hint: "undo twice with: ucdaw command run \"Edit > Undo\""}
 	}
 	return Result{
 		Message: fmt.Sprintf("Moved %s %s %s; it now starts at %s (undo takes two steps).", src.label(), where, target.label(), moved.where()),
@@ -505,9 +588,9 @@ func (st *Studio) deleteSection(ctx context.Context, ref string) (Result, error)
 	if err := st.invokeAll(ctx, gotoStep(src.Number), step{"Arranger", "Delete Range", nil}); err != nil {
 		return Result{}, err
 	}
-	after, err := st.waitSections(ctx, func(s []Section) bool { return len(s) == len(before)-1 })
+	after, err := st.expectSections(ctx, "Deleting "+src.label(), before, removed(before, src.Number), undoOnce)
 	if err != nil {
-		return Result{}, st.notConfirmed(err, "Deleting "+src.label(), after)
+		return Result{}, err
 	}
 	msg := fmt.Sprintf("Deleted %s (%s, %s)", src.label(), src.where(), st.shift(src.End-src.Start))
 	if src.Number < len(before) {
@@ -532,9 +615,11 @@ func (st *Studio) renameSection(ctx context.Context, ref, name string) (Result, 
 	if err := st.invokeAll(ctx, gotoStep(src.Number), step{"Event", "Rename Events", map[string]string{"New Name": name}}); err != nil {
 		return Result{}, err
 	}
-	after, err := st.waitSections(ctx, func(s []Section) bool { return len(s) >= src.Number && s[src.Number-1].Name == name })
+	want := append([]Section(nil), before...)
+	want[src.Number-1].Name = name
+	after, err := st.expectSections(ctx, "Renaming "+src.label(), before, want, undoOnce)
 	if err != nil {
-		return Result{}, st.notConfirmed(err, "Renaming "+src.label(), after)
+		return Result{}, err
 	}
 	return Result{Message: fmt.Sprintf("Renamed %s to %s.", src.label(), name), Data: after}, nil
 }
@@ -578,8 +663,20 @@ func (st *Studio) addSections(ctx context.Context, names string, bars float64) (
 		); err != nil {
 			return Result{}, err
 		}
-		after, err := st.waitSections(ctx, func(s []Section) bool { return len(s) == len(before)+1 })
+		// Studio Pro names a new section itself, so the check is the old
+		// sections untouched and the new one, any name, at the end.
+		length := bars * st.secondsPerBar()
+		after, err := st.waitSections(ctx, func(s []Section) bool {
+			return len(s) == len(before)+1 && sameSections(before, s[:len(before)]) &&
+				near(s[len(before)].Start, at) && near(s[len(before)].End, at+length)
+		})
 		if err != nil {
+			if err == ErrUnconfirmed && len(after) != len(before) {
+				return Result{}, Problem{
+					Message: fmt.Sprintf("adding section %s did not come out as expected; sections now: %s", name, orNone(sectionsSummary(after))),
+					Hint:    undoOnce,
+				}
+			}
 			return Result{}, st.notConfirmed(err, "Adding section "+name, after)
 		}
 		n := len(after)
