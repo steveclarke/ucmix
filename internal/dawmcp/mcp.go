@@ -213,8 +213,11 @@ func run(ctx context.Context, engine EngineFunc, req daw.Request, withData bool)
 func failure(err error) *mcp.CallToolResult {
 	text := err.Error()
 	var p daw.Problem
-	if errors.As(err, &p) && p.Hint != "" {
-		text = p.Message + " Next: " + p.Hint + "."
+	if errors.As(err, &p) {
+		text = p.Sentence()
+		if p.Hint != "" {
+			text += " Next: " + p.Hint + "."
+		}
 	}
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 }

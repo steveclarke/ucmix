@@ -49,6 +49,19 @@ type Problem struct {
 
 func (p Problem) Error() string { return p.Message }
 
+// Sentence is the message as a sentence: capital first letter, final stop.
+func (p Problem) Sentence() string {
+	m := strings.TrimSpace(p.Message)
+	if m == "" {
+		return m
+	}
+	m = strings.ToUpper(m[:1]) + m[1:]
+	if !strings.HasSuffix(m, ".") && !strings.HasSuffix(m, "?") && !strings.HasSuffix(m, "!") {
+		m += "."
+	}
+	return m
+}
+
 // MaxPlay bounds a timed playback burst.
 const MaxPlay = 60 * time.Second
 
@@ -325,9 +338,36 @@ func (st *Studio) describe(p dawschema.Param) (string, any) {
 	return fmt.Sprintf("%s: %s", label, p.Format(wire)), p.FromWire(wire)
 }
 
+// missingChannel explains a path to a channel the song does not have.
+func (st *Studio) missingChannel(path string) error {
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 || parts[0] != "mixer" || !strings.HasPrefix(parts[2], "ch") {
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(parts[2], "ch"))
+	if err != nil {
+		return nil
+	}
+	have := st.count("mixer/" + parts[1] + "/count")
+	if n <= have {
+		return nil
+	}
+	noun := map[string]string{"channel": "track", "input": "input channel", "sub": "sub output", "main": "main output", "listen": "listen bus"}[parts[1]]
+	if noun == "" {
+		noun = parts[1]
+	}
+	return Problem{
+		Message: fmt.Sprintf("there is no %s %d; the song has %d", noun, n, have),
+		Hint:    "get_song or `ucdaw state` lists the channels",
+	}
+}
+
 func (st *Studio) get(path string) (Result, error) {
 	p, err := st.param(path)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := st.missingChannel(p.Path); err != nil {
 		return Result{}, err
 	}
 	msg, value := st.describe(p)
@@ -337,6 +377,9 @@ func (st *Studio) get(path string) (Result, error) {
 func (st *Studio) set(ctx context.Context, path, value string) (Result, error) {
 	p, err := st.param(path)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := st.missingChannel(p.Path); err != nil {
 		return Result{}, err
 	}
 	if p.ReadOnly() {

@@ -584,7 +584,7 @@ func Execute() {
 func printError(w io.Writer, err error) {
 	var p daw.Problem
 	if errors.As(err, &p) {
-		fmt.Fprintln(w, safe(p.Message))
+		fmt.Fprintln(w, safe(p.Sentence()))
 		if p.Hint != "" {
 			fmt.Fprintln(w, "  "+safe(p.Hint))
 		}
