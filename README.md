@@ -31,12 +31,15 @@ Homebrew (macOS/Linux):
 brew install steveclarke/tap/ucmix
 ```
 
+This installs both `ucmix` (StudioLive mixers) and `ucdaw` (Studio Pro).
+
 Debian/RPM packages are attached to each [release](https://github.com/steveclarke/ucmix/releases).
 
 From source (Go 1.26+):
 
 ```sh
 go install github.com/steveclarke/ucmix/cmd/ucmix@latest
+go install github.com/steveclarke/ucmix/cmd/ucdaw@latest
 ```
 
 ## Quickstart
@@ -228,7 +231,7 @@ snapshot.
 
 ## ucdaw: Studio Pro over UCNET
 
-`ucdaw` (in `cmd/ucdaw`, not yet released) drives Fender Studio Pro 8 over the
+`ucdaw` (in `cmd/ucdaw`, released with `ucmix`) drives Fender Studio Pro 8 over the
 same UCNET transport, speaking as the Studio Pro Remote app. It reads every
 change back from Studio Pro before it answers, keeps a live model of the song
 from Studio Pro's own updates, and runs any of Studio Pro's own commands.
@@ -299,7 +302,51 @@ mutes and pans alone. Level arguments may be negative (`ucdaw fader Drums -3`).
 Which file is on which track comes from ucdaw's own import log (`imports.json` in
 the user config folder), or from the song's waveform cache plus Spotlight.
 
-For Claude Code:
+### Getting started with ucdaw
+
+For Studio Pro users who are not developers. You need a Mac, Studio Pro 8 and
+[Claude Code](https://claude.com/claude-code).
+
+1. Install with [Homebrew](https://brew.sh):
+
+   ```sh
+   brew install steveclarke/tap/ucmix
+   ```
+
+   This puts `ucmix` and `ucdaw` on your Mac. You only use `ucdaw`.
+2. In Studio Pro, open the settings and turn on **Remote Control Support**
+   ("Allow remote control apps to discover this DAW"). This is the same switch
+   the Studio Pro Remote app needs.
+3. Open a song in Studio Pro. Run ucdaw on the same Mac, or on another computer
+   on the same network.
+4. Check the connection:
+
+   ```sh
+   ucdaw discover
+   ```
+
+   It prints your Studio Pro. If it prints nothing, recheck step 2.
+5. Add ucdaw to Claude Code once:
+
+   ```sh
+   claude mcp add --scope user studio-pro-ucnet -- ucdaw mcp
+   ```
+6. Optional: run `ucdaw serve` in a Terminal window and leave it open. Answers
+   come back in a fraction of a second instead of after a reconnect.
+7. Start Claude Code and talk to it. Good first things to say:
+   - "What is in my song?"
+   - "Start a new song at 72 BPM with the click on."
+   - "Add a guitar track with Guitar Rig 7, and a pad track with Syntronik."
+   - "Add Verse, Chorus and Bridge, then repeat the chorus after the bridge."
+   - "Bring the pad down 3 dB."
+   - "Import the stems in my Music/stems folder and gain-stage them."
+   - "Undo that."
+
+Claude shows what Studio Pro reported back for every change. Audio edits (fades,
+splits) are sent but cannot be confirmed, because Studio Pro does not report
+audio clips to remote apps; Claude says so.
+
+For Claude Code from source:
 
 ```console
 $ go install ./cmd/ucdaw

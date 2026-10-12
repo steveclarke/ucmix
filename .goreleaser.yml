@@ -5,7 +5,8 @@ before:
     - sh -c 'mkdir -p completions && go run ./cmd/ucmix completion bash > completions/ucmix.bash && go run ./cmd/ucmix completion zsh > completions/_ucmix && go run ./cmd/ucmix completion fish > completions/ucmix.fish'
 
 builds:
-  - main: ./cmd/ucmix
+  - id: ucmix
+    main: ./cmd/ucmix
     binary: ucmix
     env:
       - CGO_ENABLED=0
@@ -19,6 +20,22 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X github.com/steveclarke/ucmix/internal/cli.version={{.Version}} -X github.com/steveclarke/ucmix/internal/cli.commit={{.ShortCommit}} -X github.com/steveclarke/ucmix/internal/cli.date={{.Date}}
+
+  - id: ucdaw
+    main: ./cmd/ucdaw
+    binary: ucdaw
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/steveclarke/ucmix/internal/dawcli.version={{.Version}}
 
 archives:
   - formats:
@@ -45,7 +62,7 @@ nfpms:
     vendor: Steve Clarke
     homepage: "https://github.com/steveclarke/ucmix"
     maintainer: "Steve Clarke <steve@sevenview.ca>"
-    description: "Control PreSonus StudioLive mixers over UCNET (unofficial)"
+    description: "Control PreSonus StudioLive mixers and Studio Pro over UCNET (unofficial)"
     license: MIT
     formats:
       - deb
@@ -71,13 +88,15 @@ brews:
     directory: Formula
     name: ucmix
     homepage: "https://github.com/steveclarke/ucmix"
-    description: "Control PreSonus StudioLive mixers over UCNET (unofficial)"
+    description: "Control PreSonus StudioLive mixers and Studio Pro over UCNET (unofficial)"
     license: "MIT"
     install: |
       bin.install "ucmix"
+      bin.install "ucdaw"
       bash_completion.install "completions/ucmix.bash" => "ucmix"
       zsh_completion.install "completions/_ucmix"
       fish_completion.install "completions/ucmix.fish"
     test: |
       system "#{bin}/ucmix --version"
+      assert_match "Usage", shell_output("#{bin}/ucdaw --help")
     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
