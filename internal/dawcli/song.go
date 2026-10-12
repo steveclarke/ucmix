@@ -22,7 +22,8 @@ func newSongCmd(o *options) *cobra.Command {
 			"the window's current template and settings and Studio Pro's default name (the date\n" +
 			"and your name). The song that was open stays open in its own tab; nothing is saved\n" +
 			"or closed. Then sets --tempo and --click and reads everything back.\n\n" +
-			"If Studio Pro shows any other window instead, ucdaw cancels it and says so.",
+			"If Studio Pro shows any other window instead, ucdaw closes it with its Cancel button\n" +
+			"and says so, or leaves it open for you when no button just cancels.",
 		Example: "  ucdaw song new\n  ucdaw song new --tempo 72 --click on",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

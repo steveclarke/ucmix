@@ -53,7 +53,7 @@ type filterIn struct {
 type commandIn struct {
 	Category string            `json:"category" jsonschema:"command category exactly as list_commands shows it, e.g. Track"`
 	Name     string            `json:"name" jsonschema:"command name exactly as list_commands shows it, e.g. Add Audio Track (mono)"`
-	Args     map[string]string `json:"args,omitempty" jsonschema:"optional command arguments as a Studio Pro macro carries them, e.g. {\"Bars\": \"4\"} for Transport / Forward Bar; a command that needs arguments and gets none opens a dialog, which ucdaw cancels"`
+	Args     map[string]string `json:"args,omitempty" jsonschema:"optional command arguments as a Studio Pro macro carries them, e.g. {\"Bars\": \"4\"} for Transport / Forward Bar; a command that needs arguments and gets none opens a dialog, which ucdaw cancels if a button just cancels it, otherwise leaves open for the musician"`
 }
 
 type faderIn struct {
@@ -166,7 +166,7 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "transport",
 		Description: "Start or stop playback, return to the start of the song, or turn the loop on or off. " +
-			"Use play with seconds or bars to audition a short stretch: it stops by itself afterwards. " +
+			"Use play with seconds or bars to audition a short stretch: it stops by itself afterwards, unless playback was already stopped in Studio Pro. " +
 			"Plain play keeps playing until you call stop. Returns one line such as \"Played 4 bars at 120 bpm, then stopped.\"",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in transportIn) (*mcp.CallToolResult, any, error) {
 		req := daw.Request{Op: "transport", Action: in.Action, Seconds: in.Seconds, Bars: in.Bars}

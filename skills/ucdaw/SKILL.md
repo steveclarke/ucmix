@@ -35,6 +35,7 @@ ucdaw song new --tempo 72 --click on # new empty song; the open one stays in its
 ucdaw transport play --bars 4        # play 4 bars, then stop
 ucdaw transport play --for 2s        # play 2 seconds, then stop
 ucdaw transport play | stop | rtz    # plain play keeps going until stop
+# A timed play that someone stops (or restarts) in Studio Pro is left alone.
 ucdaw transport loop on|off          # needs a loop range in the song
 ucdaw click on|off                   # metronome
 ucdaw tempo 96                       # bpm; `ucdaw tempo` reads it
@@ -83,8 +84,9 @@ waits until Studio Pro reports the new song's name (the date and the user's name
 "Started a new song (2026-10-12 Stephen Clarke) at 72 bpm, click on." The song
 that was open stays open in its own tab; nothing is saved or closed. serve
 follows the new song without reconnecting. If Studio Pro shows any other window
-instead, ucdaw cancels it and says so. `command run "File > New Session"` only
-cancels the New window and points here.
+instead, ucdaw closes it with its Cancel (or No) button and says so, or leaves it
+open for the musician when no button just cancels. `command run "File > New Session"`
+only cancels the New window and points here.
 
 ## Arrangement (arranger sections)
 
@@ -141,7 +143,8 @@ instead. Pass the "not read back" part on to the musician.
 - Undo is about three `Edit > Undo` presses per stem; press it until `get_song`
   no longer lists the tracks.
 - A conversion question from Studio Pro is accepted (the musician wants the
-  stems in); any other dialog is cancelled and reported.
+  stems in); any other dialog is closed with its Cancel button and reported, or
+  left open for the musician when no button just cancels.
 
 ## Favorites
 
@@ -173,8 +176,11 @@ ucdaw reports what changed ("removed Guitar Rig 7 from Guitar"). View and
 editing commands change nothing Studio Pro reports; the answer says so.
 Commands act on the current selection, like their menu items.
 
-If a command opens a dialog (it needs choices), ucdaw presses its Cancel
-button at once and says so, so Studio Pro is never left blocked.
+If a command opens a dialog (it needs choices), ucdaw presses its Cancel (or
+No, Don't…) button at once and says so, so Studio Pro is not left blocked. It
+never chooses for the musician: a dialog with no such button (Save / Don't Save,
+Yes / OK) stays open and the answer names it and its buttons; ask the musician
+to answer it in Studio Pro.
 
 ## Parameters by path
 

@@ -137,6 +137,8 @@ func (st *Studio) dismiss(ctx context.Context, d Dialog, what, hint string) Prob
 	label, err := st.session.DismissDialog(ctx)
 	var p Problem
 	switch {
+	case err == nil && label == "":
+		return Problem{Message: what + "; it closed before ucdaw answered it", Hint: hint}
 	case err == nil:
 		return Problem{Message: fmt.Sprintf("%s; ucdaw closed it with %q", what, label), Hint: hint}
 	case errors.As(err, &p):

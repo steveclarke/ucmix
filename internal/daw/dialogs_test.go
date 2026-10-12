@@ -209,3 +209,11 @@ func TestDialogCallersNameTheButtonThatClosedIt(t *testing.T) {
 		t.Errorf("pressed %v", sent)
 	}
 }
+
+func TestDismissSaysWhenTheDialogClosedByItself(t *testing.T) {
+	st, _ := newStudio(t)
+	p := st.dismiss(context.Background(), Dialog{Title: "Add Tracks", Buttons: []string{"OK", "Cancel"}}, "X opened the \"Add Tracks\" dialog", "")
+	if !strings.HasSuffix(p.Message, "it closed before ucdaw answered it") {
+		t.Errorf("message = %q", p.Message)
+	}
+}
