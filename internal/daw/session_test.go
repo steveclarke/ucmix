@@ -221,3 +221,46 @@ func TestSessionDoneWhenStudioProGoesAway(t *testing.T) {
 		t.Errorf("WaitFor = %v", err)
 	}
 }
+
+func TestChunksRejectOversizedOrInconsistentBlobs(t *testing.T) {
+	tests := []struct {
+		name  string
+		chunk proto.CKChunk
+	}{
+		{"declared total over the cap", proto.CKChunk{Offset: 0, Total: MaxBlob + 1, Size: 1, Data: []byte{1}}},
+		{"chunk past its total", proto.CKChunk{Offset: 8, Total: 10, Size: 4, Data: []byte{1, 2, 3, 4}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var c chunks
+			if _, err := c.add(tt.chunk); !errors.Is(err, ErrTooLarge) {
+				t.Errorf("add = %v, want ErrTooLarge", err)
+			}
+		})
+	}
+}
+
+func TestChunksCapBytesHeldAcrossChunks(t *testing.T) {
+	var c chunks
+	piece := make([]byte, 1<<20)
+	total := uint32(MaxBlob)
+	var err error
+	// A peer that keeps restating offset 1 MB never completes and never resets.
+	for i := 0; err == nil && i < 40; i++ {
+		_, err = c.add(proto.CKChunk{Offset: 1 << 20, Total: total, Size: uint32(len(piece)), Data: piece})
+	}
+	if !errors.Is(err, ErrTooLarge) {
+		t.Errorf("add = %v, want ErrTooLarge", err)
+	}
+}
+
+func TestChunksReassembleWithinCap(t *testing.T) {
+	var c chunks
+	if blob, err := c.add(proto.CKChunk{Offset: 0, Total: 4, Size: 2, Data: []byte{1, 2}}); err != nil || blob != nil {
+		t.Fatalf("first = %v, %v", blob, err)
+	}
+	blob, err := c.add(proto.CKChunk{Offset: 2, Total: 4, Size: 2, Data: []byte{3, 4}})
+	if err != nil || !bytes.Equal(blob, []byte{1, 2, 3, 4}) {
+		t.Errorf("blob = %v, %v", blob, err)
+	}
+}

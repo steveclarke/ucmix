@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/steveclarke/ucmix/internal/proto"
@@ -101,5 +103,30 @@ func TestModelLoadsAdvisedCommands(t *testing.T) {
 func TestDecodeZMRejectsShortPayload(t *testing.T) {
 	if _, err := DecodeZM([]byte{1, 2}); err == nil {
 		t.Error("want error")
+	}
+}
+
+func TestInflateRejectsOversizedMessage(t *testing.T) {
+	var buf bytes.Buffer
+	w := zlib.NewWriter(&buf)
+	_, _ = w.Write(make([]byte, MaxInflated+10))
+	_ = w.Close()
+	if _, err := inflate(buf.Bytes()); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("inflate = %v, want ErrTooLarge", err)
+	}
+}
+
+func TestModelStopsGrowingAtMaxPaths(t *testing.T) {
+	m := NewModel()
+	for i := 0; i < MaxPaths; i++ {
+		m.nums[fmt.Sprintf("p%d", i)] = 0
+	}
+	_ = m.ApplyFrame(proto.Frame{Code: proto.CodePV, Payload: proto.MarshalPV("new/path", 1)})
+	if _, ok := m.Num("new/path"); ok {
+		t.Error("model grew past MaxPaths")
+	}
+	_ = m.ApplyFrame(proto.Frame{Code: proto.CodePV, Payload: proto.MarshalPV("p7", 1)})
+	if v, _ := m.Num("p7"); v != 1 {
+		t.Error("existing paths must still update at the cap")
 	}
 }

@@ -138,9 +138,38 @@ func (s *Session) handshake(ctx context.Context) error {
 	return nil
 }
 
+// MaxBlob caps one chunked (CK) message before inflation.
+const MaxBlob = 16 << 20
+
+// chunks reassembles CK frames with a size cap. The shared proto assembler
+// trusts the peer; this wrapper drops any blob that claims or grows past
+// MaxBlob, and any chunk that does not fit its declared total.
+type chunks struct {
+	asm  proto.ChunkAssembler
+	held int
+}
+
+func (c *chunks) add(chunk proto.CKChunk) ([]byte, error) {
+	end := uint64(chunk.Offset) + uint64(chunk.Size)
+	if chunk.Offset == 0 {
+		c.held = 0
+	}
+	if chunk.Total > MaxBlob || end > uint64(chunk.Total) || c.held+len(chunk.Data) > MaxBlob {
+		c.asm, c.held = proto.ChunkAssembler{}, 0
+		return nil, fmt.Errorf("%w: chunked message of %d bytes", ErrTooLarge, chunk.Total)
+	}
+	c.held += len(chunk.Data)
+	blob, complete := c.asm.Add(chunk)
+	if !complete {
+		return nil, nil
+	}
+	c.held = 0
+	return blob, nil
+}
+
 // waitJM applies frames to the model until a JM with the given id arrives.
 func (s *Session) waitJM(ctx context.Context, id string) error {
-	var chunks proto.ChunkAssembler
+	var pending chunks
 	for {
 		select {
 		case frame, ok := <-s.t.Frames():
@@ -152,23 +181,25 @@ func (s *Session) waitJM(ctx context.Context, id string) error {
 					return nil
 				}
 			}
-			s.apply(&chunks, frame)
+			s.apply(&pending, frame)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
 
-func (s *Session) apply(chunks *proto.ChunkAssembler, frame proto.Frame) {
+func (s *Session) apply(pending *chunks, frame proto.Frame) {
 	if frame.Code == proto.CodeCK {
 		chunk, err := proto.ParseCK(frame.Payload)
 		if err != nil {
 			return
 		}
-		if blob, complete := chunks.Add(chunk); complete {
-			if body, err := inflate(blob); err == nil {
-				_ = s.model.ApplyJSON(body)
-			}
+		blob, err := pending.add(chunk)
+		if err != nil || blob == nil {
+			return
+		}
+		if body, err := inflate(blob); err == nil {
+			_ = s.model.ApplyJSON(body)
 		}
 		return
 	}
@@ -177,9 +208,9 @@ func (s *Session) apply(chunks *proto.ChunkAssembler, frame proto.Frame) {
 
 func (s *Session) readLoop() {
 	defer close(s.done)
-	var chunks proto.ChunkAssembler
+	var pending chunks
 	for frame := range s.t.Frames() {
-		s.apply(&chunks, frame)
+		s.apply(&pending, frame)
 	}
 }
 

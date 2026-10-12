@@ -40,3 +40,13 @@ $ ucdawpoc discover --json
 ```
 
 - New-channel updates arrive as `PV` (float), `PS` (key, NUL, 2 bytes, string, NUL) and `PC` (key, NUL, 2 bytes, uint32 colour) frames, so the live model can be kept current from ordinary parameter frames.
+
+## Security review: resource caps (23:20 NDT)
+
+An automatic review flagged unbounded allocation in `internal/daw/model.go` and `session.go`. Fixed in proportion:
+
+- Frames: already capped by UCNET's 16-bit length (64 KB).
+- Decompressed messages (`ZM`, assembled `CK`): capped at 32 MB (`MaxInflated`); larger is rejected with `ErrTooLarge`. The real snapshot is 180 KB.
+- `CK` reassembly: a session-side wrapper caps a blob at 16 MB (`MaxBlob`), rejects chunks that run past their declared total, and caps bytes held across chunks that never complete. The shared `proto.ChunkAssembler` is left untouched (mixer code path).
+- Model: at most 400,000 distinct paths (`MaxPaths`; the real model has about 156,000); new paths past that are dropped, existing ones still update. The change log was already a bounded ring.
+- One test per cap.

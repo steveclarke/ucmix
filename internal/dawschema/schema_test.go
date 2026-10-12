@@ -82,7 +82,7 @@ func TestParamTypes(t *testing.T) {
 		t.Error("primaryTime should be private")
 	}
 	p, _ = c.Lookup("mixer/channel/ch2/volume")
-	if p.Curve != "fadercurve" || p.Units != "gain.db.value" {
+	if p.Curve != "fadercurve" || p.Units != "percent" || p.Format(0.76) != "76%" {
 		t.Errorf("volume range not applied: %+v", p)
 	}
 	if p.Pattern != "mixer/channel/ch<n>/volume" {

@@ -120,6 +120,9 @@ func (p Param) Format(wire float64) string {
 	case "bpm.value":
 		return trimFloat(math.Round(value*100)/100) + " bpm"
 	case "percent":
+		if p.Max > 1 {
+			return trimFloat(math.Round(value)) + "%"
+		}
 		return trimFloat(math.Round(value*100)) + "%"
 	}
 	return trimFloat(math.Round(value*1000) / 1000)
@@ -440,6 +443,11 @@ func (b *builder) param(p node) Param {
 	out.Min = parseFloat(p.attr("min"), out.Min)
 	out.Max = parseFloat(p.attr("max"), out.Max)
 	out.Default = parseFloat(p.attr("def"), out.Default)
+	if out.Curve == "fadercurve" {
+		// Studio Pro's fader curve is not published; ucdaw shows and takes
+		// fader travel as a percentage of the wire position instead of guessing dB.
+		out.Min, out.Max, out.Default, out.Units = 0, 100, 0, "percent"
+	}
 	switch out.Type {
 	case List:
 		out.Options = b.lists[out.Units]

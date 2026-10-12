@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -28,6 +29,19 @@ type Change struct {
 }
 
 const changeLogSize = 8192
+
+// Limits on what Studio Pro can make ucdaw hold. The real model has about
+// 156,000 paths and a 180 KB command catalog; these leave wide headroom while
+// keeping a misbehaving peer from exhausting memory.
+const (
+	// MaxInflated caps one decompressed message.
+	MaxInflated = 32 << 20
+	// MaxPaths caps distinct parameter paths in the model.
+	MaxPaths = 400_000
+)
+
+// ErrTooLarge reports a message or model over its limit.
+var ErrTooLarge = errors.New("daw: Studio Pro sent more data than ucdaw accepts")
 
 // Model is the live song state Studio Pro reports: every parameter value it
 // has sent (wire values, 0..1 for ranged parameters), its strings, and its
@@ -141,12 +155,28 @@ func (m *Model) mutate(fn func(record func(string))) {
 	m.mu.Unlock()
 }
 
+// full reports whether path would be a new key beyond MaxPaths.
+func (m *Model) full(path string) bool {
+	if len(m.nums)+len(m.strs) < MaxPaths {
+		return false
+	}
+	_, num := m.nums[path]
+	_, str := m.strs[path]
+	return !num && !str
+}
+
 func (m *Model) setNum(path string, v float64, record func(string)) {
+	if m.full(path) {
+		return
+	}
 	m.nums[path] = v
 	record(path)
 }
 
 func (m *Model) setStr(path, v string, record func(string)) {
+	if m.full(path) {
+		return
+	}
 	m.strs[path] = v
 	record(path)
 }
@@ -203,9 +233,12 @@ func inflate(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("daw: inflating: %w", err)
 	}
 	defer func() { _ = r.Close() }()
-	out, err := io.ReadAll(r)
+	out, err := io.ReadAll(io.LimitReader(r, MaxInflated+1))
 	if err != nil {
 		return nil, fmt.Errorf("daw: inflating: %w", err)
+	}
+	if len(out) > MaxInflated {
+		return nil, fmt.Errorf("%w: message inflates past %d MB", ErrTooLarge, MaxInflated>>20)
 	}
 	return out, nil
 }

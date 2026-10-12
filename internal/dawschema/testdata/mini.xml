@@ -14,17 +14,26 @@
 	<uc:Parameters>
 		<uc:ParamList id="Transport">
 			<uc:Param id="start" name="Start"/>
+			<uc:Param id="stop" name="Stop"/>
+			<uc:Param id="returnToZero" name="RTZ"/>
+			<uc:Param id="loop" name="Loop"/>
 			<uc:Param id="primaryTime" type="string" flags="private"/>
 			<uc:Param id="tempo" type="float" range="Tempo" name="Tempo"/>
 			<uc:Param id="timeSignatureNum" type="int" range="Num"/>
 			<uc:Param id="timeSignatureDenom" type="list" units="Denom"/>
+		</uc:ParamList>
+		<uc:ParamList id="Metronome">
+			<uc:Param id="clickOn" name="Click"/>
 		</uc:ParamList>
 		<uc:ParamList id="Group">
 			<uc:Param id="count" type="int" max="1000" flags="readonly"/>
 		</uc:ParamList>
 		<uc:ParamList id="ChannelGroup" inherit="Group"/>
 		<uc:ParamList id="Channel">
+			<uc:Param id="type" type="string" flags="readonly"/>
 			<uc:Param id="label" type="string" name="Title"/>
+			<uc:Param id="speakerFormat" type="string" flags="readonly"/>
+			<uc:Param id="mute" name="Mute"/>
 			<uc:Param id="volume" type="float" range="Volume" name="Volume"/>
 			<uc:Param id="gain" type="float" min="0" max="1.5"/>
 		</uc:ParamList>
@@ -50,6 +59,7 @@
 		<uc:Template id="Doc" paramlist="Document"/>
 		<uc:Template id="DAWRemote" flags="public">
 			<uc:Component id="transport" paramlist="Transport"/>
+			<uc:Component id="metronome" paramlist="Metronome"/>
 			<uc:Component id="mixer">
 				<uc:Component id="channel" paramlist="ChannelGroup">
 					<uc:foreach id="$i" min="1" max="3">
