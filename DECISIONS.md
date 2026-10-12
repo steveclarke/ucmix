@@ -62,3 +62,47 @@ An automatic review flagged unbounded allocation in `internal/daw/model.go` and 
 - **Panic on LAN input.** `ucdaw discover` indexed `strings.Fields(version)[0]`, which panics on a blank version from a crafted announcement. Now guarded (`discoverLine`). Self-review of every wire read (`parseAnnouncement`, PV/PS/PC/PE/JM/CK decoders, ZM inflate, CK reassembly, capture reader): all length-checked; added fuzz targets `FuzzParseAnnouncement` and `FuzzModelApplyFrame` (ran 15 s and 20 s, no crashes) plus a table test that truncated PV/PS/PC/ZM payloads return errors.
 - **File modes.** `ucdaw state record` captures are created 0600 (an existing file is tightened too). The endpoint cache was already 0600 in a 0700 directory; the serve socket is 0600 in a 0700 directory. Hugo capture files set to 0600, directory 0700.
 - **Terminal escapes.** Every styled line (messages, list rows, hints, errors, discover lines, serve log) goes through `safe()`, which turns C0/C1 controls, ESC and DEL into `?` (tabs kept in messages, replaced in table cells). `--json` output is left to the JSON encoder, which escapes control characters.
+
+## Steps 2 and 3: schema and core CLI (00:20 NDT)
+
+- `internal/dawschema` expands Studio Pro's own `dawremote.xml` (loaded from the app bundle at runtime, `--schema`/`UCDAW_SCHEMA` to override): 156,443 paths, 399 patterns. Ranged values are converted to and from the 0..1 wire. Fader volume is shown as travel percent because Studio Pro's `fadercurve` is unpublished; dB is not guessed.
+- Endpoint cache (`~/Library/Caches/ucdaw/endpoint.json`) makes a direct command ~0.35 s; a cold discovery is ~1.5–3.7 s.
+- Live findings:
+  - **Stop:** one live Stop was answered by `stop=1, stop=0` with `start` still 1. Stop now waits for `start=0` and presses once more if needed.
+  - **Loop:** the loop button carries its target (`PV transport/loop` 1 = on, 0 = off), not a toggle. Studio Pro refuses loop on (echoes 0) while the song has no loop range; ucdaw says so and suggests `Transport > Loop Selection`. A test set a loop end 2 bars in (`Transport > Forward Bar` ×2, `Set Loop End`); Undo did not revert it, so the empty song now has a loop range of 0–2 bars. Loop is off.
+- Live run (direct mode, 00:18 NDT):
+
+```
+$ ucdaw state
+120 bpm, 4/4, click on, loop off, stopped; no tracks yet.
+$ ucdaw click off / click on / click on
+Click off. / Click on. / Click is already on.
+$ ucdaw tempo 96 / tempo 120
+Tempo 96 bpm (was 120). / Tempo 120 bpm (was 96).
+$ ucdaw transport loop on
+Loop on.
+$ ucdaw transport play --for 1s
+Played 1 s at 120 bpm, then stopped.
+$ ucdaw transport play --bars 1
+Played 1 bar at 120 bpm, then stopped.
+$ ucdaw transport rtz
+Back to the start of the song.
+$ ucdaw command run Track "Add Audio Track (mono)"
+Ran Track > Add Audio Track (mono): added Track 1 (audio).
+$ ucdaw param set mixer/channel/ch1/label Guitar
+Guitar label: "Guitar" (was "Track 1").
+$ ucdaw param set mixer/channel/ch1/volume 50
+Guitar volume: 50% (was 76%).
+$ ucdaw command run "Edit > Undo"   (x2)
+Ran Edit > Undo: Guitar volume: 76%.
+Ran Edit > Undo: removed Guitar.
+$ ucdaw state
+120 bpm, 4/4, click on, loop on, stopped; no tracks yet.
+$ ucdaw transport loop off
+Loop off.
+$ ucdaw params tempo
+1 parameter match "tempo"; <n> is a channel or slot number.
+  transport/tempo  float  10..400 bpm.value
+$ ucdaw command list "zoom full"
+4 Studio Pro commands match "zoom full".
+```

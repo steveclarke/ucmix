@@ -115,13 +115,40 @@ func TestPlayRefusesLongTimedBursts(t *testing.T) {
 	}
 }
 
-func TestLoopTogglesToTarget(t *testing.T) {
+func TestLoopNeedsALoopRange(t *testing.T) {
 	st, _ := newStudio(t)
+	_, err := st.Do(context.Background(), Request{Op: "transport", Action: "loop", Value: "on"})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "no loop range") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestStopPressesAgainWhenFirstStopIsIgnored(t *testing.T) {
+	st, fake := newStudio(t)
+	orig := stopWait
+	stopWait = 50 * time.Millisecond
+	t.Cleanup(func() { stopWait = orig })
+	fake.stubbornStops = 1
+	if got := do(t, st, Request{Op: "transport", Action: "play", Seconds: 0.01}); !strings.HasPrefix(got, "Played") {
+		t.Errorf("play = %q", got)
+	}
+	if st.playing() {
+		t.Error("still playing")
+	}
+}
+
+func TestLoopTogglesToTarget(t *testing.T) {
+	st, fake := newStudio(t)
+	fake.loopRange = true
 	if got := do(t, st, Request{Op: "transport", Action: "loop", Value: "on"}); got != "Loop on." {
 		t.Errorf("loop on = %q", got)
 	}
 	if got := do(t, st, Request{Op: "transport", Action: "loop", Value: "on"}); got != "Loop is already on." {
 		t.Errorf("loop on again = %q", got)
+	}
+	if got := do(t, st, Request{Op: "transport", Action: "loop", Value: "off"}); got != "Loop off." {
+		t.Errorf("loop off = %q", got)
 	}
 }
 

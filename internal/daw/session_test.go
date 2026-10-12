@@ -26,6 +26,10 @@ type fakeStudio struct {
 	closed   bool
 	echo     bool
 	loop     bool
+	// loopRange is whether the song has a loop range (Studio Pro refuses loop without one).
+	loopRange bool
+	// stubbornStops is how many Stop presses to answer without stopping.
+	stubbornStops int
 	snapshot []proto.Frame
 	// onCommand answers an InvokeCommand with update frames.
 	onCommand map[string][]proto.Frame
@@ -83,10 +87,17 @@ func (f *fakeStudio) SendBatch(ctx context.Context, frames []proto.Frame) error 
 			f.frames <- pv("transport/start", 1)
 			f.frames <- pv("transport/stop", 0)
 		case "transport/stop":
+			if f.stubbornStops > 0 {
+				f.stubbornStops--
+				f.frames <- pv("transport/stop", 1)
+				f.frames <- pv("transport/stop", 0)
+				continue
+			}
 			f.frames <- pv("transport/start", 0)
 			f.frames <- pv("transport/stop", 1)
 		case "transport/loop":
-			f.loop = !f.loop
+			_, v, _ := proto.UnmarshalPV(frame.Payload)
+			f.loop = v == 1 && f.loopRange
 			f.frames <- pv("transport/loop", float32(boolWire(f.loop)))
 		}
 	}

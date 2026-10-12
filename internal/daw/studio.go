@@ -129,9 +129,27 @@ func (st *Studio) press(ctx context.Context, path string, cond func(*Model) bool
 	return st.session.confirm(ctx, cond)
 }
 
+// stop presses Stop until Studio Pro reports playback ended. Live tests saw
+// one Stop answered by a stop=1/stop=0 blip with playback still running, so a
+// second press follows if the first is not confirmed.
 func (st *Studio) stop(ctx context.Context) error {
-	return st.press(ctx, "transport/stop", NumIs("transport/start", 0))
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err = st.session.Press(ctx, "transport/stop", 1); err != nil {
+			return err
+		}
+		waitCtx, cancel := context.WithTimeout(ctx, stopWait)
+		err = st.session.WaitFor(waitCtx, NumIs("transport/start", 0))
+		cancel()
+		if err == nil || ctx.Err() != nil || errors.Is(err, ErrConnectionClosed) {
+			return err
+		}
+	}
+	return ErrUnconfirmed
 }
+
+// stopWait is how long one Stop press waits for playback to end.
+var stopWait = time.Second
 
 func (st *Studio) transport(ctx context.Context, req Request) (Result, error) {
 	switch req.Action {
@@ -206,10 +224,17 @@ func (st *Studio) loop(ctx context.Context, action, value string) (Result, error
 	if target == current {
 		return Result{Message: "Loop is already " + onOff(target) + "."}, nil
 	}
-	if err := st.session.Press(ctx, "transport/loop", 1); err != nil {
+	// The loop button carries its target state (1 on, 0 off); it is not a toggle.
+	if err := st.session.Press(ctx, "transport/loop", boolWire(target)); err != nil {
 		return Result{}, err
 	}
 	if err := st.session.confirm(ctx, NumIs("transport/loop", boolWire(target))); err != nil {
+		if target && st.num("transport/loop") < 0.5 && !errors.Is(err, ErrConnectionClosed) {
+			return Result{}, Problem{
+				Message: "Studio Pro kept the loop off: the song has no loop range yet.",
+				Hint:    `select a range and run: ucdaw command run "Transport > Loop Selection"`,
+			}
+		}
 		return Result{}, st.unconfirmed(err, "Loop "+onOff(target))
 	}
 	return Result{Message: "Loop " + onOff(target) + "."}, nil
