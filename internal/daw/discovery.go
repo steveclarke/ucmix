@@ -39,7 +39,7 @@ type Endpoint struct {
 	Name        string `json:"name"`
 	IP          string `json:"ip"`
 	ControlPort int    `json:"controlPort"`
-	ServerID    byte   `json:"-"`
+	ServerID    byte   `json:"serverId"`
 }
 
 var listenAnnouncements = func() (net.PacketConn, error) {
@@ -69,6 +69,24 @@ var listenAnnouncements = func() (net.PacketConn, error) {
 
 // Scan passively listens for DAW announcements for timeout.
 func Scan(ctx context.Context, timeout time.Duration) ([]Endpoint, error) {
+	return scan(ctx, timeout, false)
+}
+
+// FindStudioPro listens until the first Studio Pro 8 announcement (they come
+// about once a second) or timeout, and returns that endpoint.
+func FindStudioPro(ctx context.Context, timeout time.Duration) (Endpoint, error) {
+	found, err := scan(ctx, timeout, true)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	return SelectStudioPro(found)
+}
+
+func isStudioPro(e Endpoint) bool {
+	return e.DeviceClass == "DAW" && strings.HasSuffix(e.Identity, ".studioapp8")
+}
+
+func scan(ctx context.Context, timeout time.Duration, first bool) ([]Endpoint, error) {
 	conn, err := listenAnnouncements()
 	if err != nil {
 		return nil, err
@@ -102,6 +120,9 @@ func Scan(ctx context.Context, timeout time.Duration) ([]Endpoint, error) {
 		}
 		if endpoint, ok := parseAnnouncement(buffer[:n], addr); ok {
 			found[endpoint.Identity] = endpoint
+			if first && isStudioPro(endpoint) {
+				break
+			}
 		}
 	}
 
@@ -178,8 +199,7 @@ func addressHost(addr net.Addr) (string, bool) {
 func SelectStudioPro(endpoints []Endpoint) (Endpoint, error) {
 	var matches []Endpoint
 	for _, endpoint := range endpoints {
-		if endpoint.DeviceClass == "DAW" &&
-			strings.HasSuffix(endpoint.Identity, ".studioapp8") {
+		if isStudioPro(endpoint) {
 			matches = append(matches, endpoint)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"net"
 	"sync"
@@ -24,7 +25,10 @@ type fakeStudio struct {
 	frames   chan proto.Frame
 	closed   bool
 	echo     bool
+	loop     bool
 	snapshot []proto.Frame
+	// onCommand answers an InvokeCommand with update frames.
+	onCommand map[string][]proto.Frame
 }
 
 func (f *fakeStudio) Send(_ context.Context, frame proto.Frame) error {
@@ -47,6 +51,15 @@ func (f *fakeStudio) Send(_ context.Context, frame proto.Frame) error {
 				f.frames <- s
 			}
 			f.frames <- jmFrame(`{"id": "SubscriptionReply"}`)
+		case "InvokeCommand":
+			var body struct {
+				Category string `json:"commandCategory"`
+				Name     string `json:"commandName"`
+			}
+			_ = json.Unmarshal(msg.Body, &body)
+			for _, out := range f.onCommand[body.Category+"|"+body.Name] {
+				f.frames <- out
+			}
 		}
 	case proto.CodePV:
 		if f.echo {
@@ -58,9 +71,34 @@ func (f *fakeStudio) Send(_ context.Context, frame proto.Frame) error {
 
 func (f *fakeStudio) SendBatch(ctx context.Context, frames []proto.Frame) error {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.batches = append(f.batches, frames)
-	f.mu.Unlock()
+	for _, frame := range frames {
+		if frame.Code != proto.CodePV || f.closed {
+			continue
+		}
+		key, _, _ := proto.UnmarshalPV(frame.Payload)
+		switch key {
+		case "transport/start":
+			f.frames <- pv("transport/start", 1)
+			f.frames <- pv("transport/stop", 0)
+		case "transport/stop":
+			f.frames <- pv("transport/start", 0)
+			f.frames <- pv("transport/stop", 1)
+		case "transport/loop":
+			f.loop = !f.loop
+			f.frames <- pv("transport/loop", float32(boolWire(f.loop)))
+		}
+	}
 	return nil
+}
+
+func pv(key string, v float32) proto.Frame {
+	return proto.Frame{Code: proto.CodePV, Payload: proto.MarshalPV(key, v)}
+}
+
+func ps(key, v string) proto.Frame {
+	return proto.Frame{Code: proto.CodePS, Payload: proto.MarshalPS(key, v)}
 }
 
 func (f *fakeStudio) Frames() <-chan proto.Frame { return f.frames }

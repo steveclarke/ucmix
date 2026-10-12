@@ -1,0 +1,703 @@
+package daw
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/steveclarke/ucmix/internal/dawschema"
+)
+
+// Request is one musician-level operation. The CLI, the serve socket and the
+// MCP server all speak it.
+type Request struct {
+	Op       string  `json:"op"`
+	Action   string  `json:"action,omitempty"`
+	Path     string  `json:"path,omitempty"`
+	Value    string  `json:"value,omitempty"`
+	Category string  `json:"category,omitempty"`
+	Name     string  `json:"name,omitempty"`
+	Filter   string  `json:"filter,omitempty"`
+	Seconds  float64 `json:"seconds,omitempty"`
+	Bars     float64 `json:"bars,omitempty"`
+	BPM      float64 `json:"bpm,omitempty"`
+}
+
+// Result is what happened, in one line, plus structured detail for --json.
+type Result struct {
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+// Engine runs requests against Studio Pro.
+type Engine interface {
+	Do(ctx context.Context, req Request) (Result, error)
+}
+
+// Problem is an error a musician can act on: what went wrong and what to do.
+type Problem struct {
+	Message string
+	Hint    string
+}
+
+func (p Problem) Error() string { return p.Message }
+
+// MaxPlay bounds a timed playback burst.
+const MaxPlay = 60 * time.Second
+
+// Studio runs requests on a live session.
+type Studio struct {
+	session *Session
+	schema  *dawschema.Catalog
+}
+
+// NewStudio wraps a session with the parameter catalog.
+func NewStudio(session *Session, schema *dawschema.Catalog) *Studio {
+	return &Studio{session: session, schema: schema}
+}
+
+// Do runs one request.
+func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
+	switch req.Op {
+	case "transport":
+		return st.transport(ctx, req)
+	case "click":
+		return st.click(ctx, req.Action)
+	case "tempo":
+		return st.tempo(ctx, req.BPM)
+	case "get":
+		return st.get(req.Path)
+	case "set":
+		return st.set(ctx, req.Path, req.Value)
+	case "song":
+		return st.song(), nil
+	case "commands":
+		return st.commands(req.Filter), nil
+	case "run":
+		return st.run(ctx, req.Category, req.Name)
+	case "params":
+		return Params(st.schema, req.Filter), nil
+	}
+	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
+}
+
+func (st *Studio) model() *Model { return st.session.Model() }
+
+func (st *Studio) num(path string) float64 {
+	v, _ := st.model().Num(path)
+	return v
+}
+
+func (st *Studio) human(path string) float64 {
+	p, ok := st.schema.Lookup(path)
+	if !ok {
+		return st.num(path)
+	}
+	return p.FromWire(st.num(path))
+}
+
+// Tempo is the current tempo in bpm.
+func (st *Studio) Tempo() float64 { return st.human("transport/tempo") }
+
+func (st *Studio) timeSignature() (int, int) {
+	num := int(st.human("transport/timeSignatureNum"))
+	denom := 4
+	if p, ok := st.schema.Lookup("transport/timeSignatureDenom"); ok {
+		if d, err := strconv.Atoi(p.Format(st.num("transport/timeSignatureDenom"))); err == nil {
+			denom = d
+		}
+	}
+	if num <= 0 {
+		num = 4
+	}
+	return num, denom
+}
+
+func (st *Studio) playing() bool { return st.num("transport/start") >= 0.5 }
+
+func (st *Studio) press(ctx context.Context, path string, cond func(*Model) bool) error {
+	if err := st.session.Press(ctx, path, 1); err != nil {
+		return err
+	}
+	return st.session.confirm(ctx, cond)
+}
+
+func (st *Studio) stop(ctx context.Context) error {
+	return st.press(ctx, "transport/stop", NumIs("transport/start", 0))
+}
+
+func (st *Studio) transport(ctx context.Context, req Request) (Result, error) {
+	switch req.Action {
+	case "play":
+		return st.play(ctx, req)
+	case "stop":
+		if err := st.stop(ctx); err != nil {
+			return Result{}, st.unconfirmed(err, "Stop")
+		}
+		return Result{Message: "Stopped."}, nil
+	case "rtz", "return":
+		if err := st.session.Press(ctx, "transport/returnToZero", 1); err != nil {
+			return Result{}, err
+		}
+		return Result{Message: "Back to the start of the song."}, nil
+	case "loop", "loop-on", "loop-off":
+		return st.loop(ctx, req.Action, req.Value)
+	}
+	return Result{}, Problem{
+		Message: fmt.Sprintf("unknown transport action %q", req.Action),
+		Hint:    "use play, stop, rtz or loop",
+	}
+}
+
+func (st *Studio) play(ctx context.Context, req Request) (Result, error) {
+	duration := time.Duration(req.Seconds * float64(time.Second))
+	what := ""
+	if req.Bars > 0 {
+		num, denom := st.timeSignature()
+		beats := req.Bars * float64(num) * 4 / float64(denom)
+		duration = time.Duration(beats * 60 / st.Tempo() * float64(time.Second))
+		what = fmt.Sprintf("%s bar%s", trim(req.Bars), plural(req.Bars))
+	}
+	if duration > MaxPlay {
+		return Result{}, Problem{
+			Message: fmt.Sprintf("%s is longer than the %s limit for a timed play", duration.Round(time.Second), MaxPlay),
+			Hint:    "play without a length and stop it yourself",
+		}
+	}
+	if !st.playing() {
+		if err := st.press(ctx, "transport/start", NumIs("transport/start", 1)); err != nil {
+			return Result{}, st.unconfirmed(err, "Play")
+		}
+	}
+	if duration <= 0 {
+		return Result{Message: fmt.Sprintf("Playing at %s bpm.", trim(round2(st.Tempo())))}, nil
+	}
+	if what == "" {
+		what = fmt.Sprintf("%s s", trim(round2(duration.Seconds())))
+	}
+	waitErr := sleepFor(ctx, duration)
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err := st.stop(stopCtx); err != nil {
+		return Result{}, st.unconfirmed(err, "Stop after playing")
+	}
+	if waitErr != nil {
+		return Result{Message: "Interrupted; stopped."}, nil
+	}
+	return Result{Message: fmt.Sprintf("Played %s at %s bpm, then stopped.", what, trim(round2(st.Tempo())))}, nil
+}
+
+func (st *Studio) loop(ctx context.Context, action, value string) (Result, error) {
+	current := st.num("transport/loop") >= 0.5
+	target := !current
+	switch {
+	case action == "loop-on" || value == "on":
+		target = true
+	case action == "loop-off" || value == "off":
+		target = false
+	}
+	if target == current {
+		return Result{Message: "Loop is already " + onOff(target) + "."}, nil
+	}
+	if err := st.session.Press(ctx, "transport/loop", 1); err != nil {
+		return Result{}, err
+	}
+	if err := st.session.confirm(ctx, NumIs("transport/loop", boolWire(target))); err != nil {
+		return Result{}, st.unconfirmed(err, "Loop "+onOff(target))
+	}
+	return Result{Message: "Loop " + onOff(target) + "."}, nil
+}
+
+func (st *Studio) click(ctx context.Context, action string) (Result, error) {
+	current := st.num("metronome/clickOn") >= 0.5
+	var target bool
+	switch action {
+	case "on":
+		target = true
+	case "off":
+		target = false
+	case "", "toggle":
+		target = !current
+	case "status":
+		return Result{Message: "Click is " + onOff(current) + ".", Data: map[string]bool{"on": current}}, nil
+	default:
+		return Result{}, Problem{Message: fmt.Sprintf("click takes on, off or toggle, not %q", action)}
+	}
+	data := map[string]bool{"on": target}
+	if target == current {
+		return Result{Message: "Click is already " + onOff(target) + ".", Data: data}, nil
+	}
+	if err := st.session.SetNum(ctx, "metronome/clickOn", boolWire(target)); err != nil {
+		return Result{}, st.unconfirmed(err, "Click "+onOff(target))
+	}
+	return Result{Message: "Click " + onOff(target) + ".", Data: data}, nil
+}
+
+func (st *Studio) tempo(ctx context.Context, bpm float64) (Result, error) {
+	before := round2(st.Tempo())
+	if bpm == 0 {
+		return Result{Message: fmt.Sprintf("Tempo is %s bpm.", trim(before)), Data: map[string]float64{"bpm": before}}, nil
+	}
+	p, _ := st.schema.Lookup("transport/tempo")
+	wire, err := p.ToWire(bpm)
+	if err != nil {
+		return Result{}, Problem{Message: fmt.Sprintf("tempo must be between %s and %s bpm", trim(p.Min), trim(p.Max))}
+	}
+	if closeTo(st.num("transport/tempo"), wire) {
+		return Result{Message: fmt.Sprintf("Tempo is already %s bpm.", trim(before)), Data: map[string]float64{"bpm": before}}, nil
+	}
+	if err := st.session.SetNum(ctx, "transport/tempo", wire); err != nil {
+		return Result{}, st.unconfirmed(err, "Tempo change")
+	}
+	after := round2(st.Tempo())
+	return Result{
+		Message: fmt.Sprintf("Tempo %s bpm (was %s).", trim(after), trim(before)),
+		Data:    map[string]float64{"bpm": after, "was": before},
+	}, nil
+}
+
+func (st *Studio) param(path string) (dawschema.Param, error) {
+	path = strings.Trim(path, "/")
+	p, ok := st.schema.Lookup(path)
+	if !ok {
+		return p, Problem{
+			Message: fmt.Sprintf("Studio Pro has no parameter %q", path),
+			Hint:    "list them with: ucdaw params " + lastSegment(path),
+		}
+	}
+	return p, nil
+}
+
+// describe renders a path's current value as "<where> <what>: <value>".
+func (st *Studio) describe(p dawschema.Param) (string, any) {
+	label := st.pathLabel(p.Path)
+	switch p.Type {
+	case dawschema.String:
+		s, _ := st.model().Str(p.Path)
+		return fmt.Sprintf("%s: %q", label, s), s
+	case dawschema.Color:
+		return fmt.Sprintf("%s: #%08x", label, uint32(st.num(p.Path))), uint32(st.num(p.Path))
+	}
+	wire, ok := st.model().Num(p.Path)
+	if !ok {
+		return label + ": not reported by Studio Pro", nil
+	}
+	return fmt.Sprintf("%s: %s", label, p.Format(wire)), p.FromWire(wire)
+}
+
+func (st *Studio) get(path string) (Result, error) {
+	p, err := st.param(path)
+	if err != nil {
+		return Result{}, err
+	}
+	msg, value := st.describe(p)
+	return Result{Message: msg + ".", Data: map[string]any{"path": p.Path, "value": value}}, nil
+}
+
+func (st *Studio) set(ctx context.Context, path, value string) (Result, error) {
+	p, err := st.param(path)
+	if err != nil {
+		return Result{}, err
+	}
+	if p.ReadOnly() {
+		return Result{}, Problem{Message: fmt.Sprintf("%s is read-only; Studio Pro reports it but does not take changes", p.Path)}
+	}
+	before, _ := st.describe(p)
+	if p.Type == dawschema.String {
+		if err := st.session.SetStr(ctx, p.Path, value); err != nil {
+			return Result{}, st.unconfirmed(err, "Change to "+p.Path)
+		}
+	} else {
+		wire, err := p.ParseHuman(value)
+		if err != nil {
+			return Result{}, Problem{Message: err.Error()}
+		}
+		if err := st.session.SetNum(ctx, p.Path, wire); err != nil {
+			return Result{}, st.unconfirmed(err, "Change to "+p.Path)
+		}
+	}
+	after, v := st.describe(p)
+	return Result{
+		Message: fmt.Sprintf("%s (was %s).", after, valuePart(before)),
+		Data:    map[string]any{"path": p.Path, "value": v},
+	}, nil
+}
+
+func valuePart(described string) string {
+	if i := strings.LastIndex(described, ": "); i >= 0 {
+		return described[i+2:]
+	}
+	return described
+}
+
+// pathLabel names a path the way a musician would: "Guitar volume".
+func (st *Studio) pathLabel(path string) string {
+	parts := strings.Split(path, "/")
+	if len(parts) >= 4 && parts[0] == "mixer" && strings.HasPrefix(parts[2], "ch") {
+		name, _ := st.model().Str(strings.Join(parts[:3], "/") + "/label")
+		if name != "" {
+			return name + " " + strings.Join(parts[3:], " ")
+		}
+	}
+	switch path {
+	case "transport/tempo":
+		return "Tempo"
+	case "metronome/clickOn":
+		return "Click"
+	}
+	return path
+}
+
+// Channel is one mixer channel in the song.
+type Channel struct {
+	Path    string   `json:"path"`
+	Name    string   `json:"name"`
+	Kind    string   `json:"kind"`
+	Format  string   `json:"format,omitempty"`
+	Volume  string   `json:"volume,omitempty"`
+	Mute    bool     `json:"mute,omitempty"`
+	Solo    bool     `json:"solo,omitempty"`
+	Armed   bool     `json:"armed,omitempty"`
+	Inserts []string `json:"inserts,omitempty"`
+}
+
+// Song is the live summary of the open song.
+type Song struct {
+	Document string    `json:"document,omitempty"`
+	Tempo    float64   `json:"tempo"`
+	Meter    string    `json:"timeSignature"`
+	Click    bool      `json:"click"`
+	Playing  bool      `json:"playing"`
+	Loop     bool      `json:"loop"`
+	Channels []Channel `json:"channels"`
+}
+
+func (st *Studio) channels() []Channel {
+	var out []Channel
+	for _, group := range []string{"input", "channel", "sub", "main"} {
+		base := "mixer/" + group
+		count := int(math.Round(st.num(base+"/count") * 1000))
+		for i := 1; i <= count; i++ {
+			path := fmt.Sprintf("%s/ch%d", base, i)
+			name, _ := st.model().Str(path + "/label")
+			kind, _ := st.model().Str(path + "/type")
+			format, _ := st.model().Str(path + "/speakerFormat")
+			ch := Channel{
+				Path:   path,
+				Name:   name,
+				Kind:   kind,
+				Format: format,
+				Mute:   st.num(path+"/mute") >= 0.5,
+				Solo:   st.num(path+"/solo") >= 0.5,
+				Armed:  st.num(path+"/recordArmed") >= 0.5,
+			}
+			if p, ok := st.schema.Lookup(path + "/volume"); ok {
+				if wire, ok := st.model().Num(path + "/volume"); ok {
+					ch.Volume = p.Format(wire)
+				}
+			}
+			inserts := int(math.Round(st.num(path+"/inserts/count") * 1000))
+			for slot := 1; slot <= inserts; slot++ {
+				if device, _ := st.model().Str(fmt.Sprintf("%s/inserts/slot%d/deviceName", path, slot)); device != "" {
+					ch.Inserts = append(ch.Inserts, device)
+				}
+			}
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// Song summarizes the live song.
+func (st *Studio) Song() Song {
+	num, denom := st.timeSignature()
+	title, _ := st.model().Str("document/title")
+	return Song{
+		Document: title,
+		Tempo:    round2(st.Tempo()),
+		Meter:    fmt.Sprintf("%d/%d", num, denom),
+		Click:    st.num("metronome/clickOn") >= 0.5,
+		Playing:  st.playing(),
+		Loop:     st.num("transport/loop") >= 0.5,
+		Channels: st.channels(),
+	}
+}
+
+func kindWord(kind string) string {
+	switch kind {
+	case "AudioTrack":
+		return "audio"
+	case "MusicTrack", "InstrumentTrack":
+		return "instrument"
+	case "AudioOutput":
+		return "output"
+	case "AudioInput":
+		return "input"
+	case "AudioEffect", "FXChannel":
+		return "FX"
+	case "AudioGroup", "BusChannel":
+		return "bus"
+	}
+	return strings.ToLower(kind)
+}
+
+func (st *Studio) song() Result {
+	song := st.Song()
+	state := "stopped"
+	if song.Playing {
+		state = "playing"
+	}
+	var tracks []string
+	for _, ch := range song.Channels {
+		if strings.HasPrefix(ch.Path, "mixer/main/") {
+			continue
+		}
+		desc := ch.Name + " (" + kindWord(ch.Kind)
+		if ch.Format != "" && ch.Kind == "AudioTrack" {
+			desc += ", " + strings.ToLower(ch.Format)
+		}
+		if len(ch.Inserts) > 0 {
+			desc += "; " + strings.Join(ch.Inserts, ", ")
+		}
+		tracks = append(tracks, desc+")")
+	}
+	msg := fmt.Sprintf("%s bpm, %s, click %s, loop %s, %s; ", trim(song.Tempo), song.Meter, onOff(song.Click), onOff(song.Loop), state)
+	switch len(tracks) {
+	case 0:
+		msg += "no tracks yet."
+	default:
+		msg += fmt.Sprintf("%d channel%s: %s.", len(tracks), plural(float64(len(tracks))), strings.Join(tracks, ", "))
+	}
+	return Result{Message: msg, Data: song}
+}
+
+// FindCommand resolves a command from a category and name, matching case
+// and accepting a unique name without its category.
+func FindCommand(all []Command, category, name string) (Command, error) {
+	if category != "" && name == "" {
+		if cat, rest, ok := strings.Cut(category, "|"); ok {
+			category, name = cat, rest
+		} else if cat, rest, ok := strings.Cut(category, ">"); ok {
+			category, name = strings.TrimSpace(cat), strings.TrimSpace(rest)
+		} else {
+			category, name = "", category
+		}
+	}
+	var matches []Command
+	for _, c := range all {
+		if strings.EqualFold(c.Name, name) && (category == "" || strings.EqualFold(c.Category, category)) {
+			matches = append(matches, c)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		hint := "list them with: ucdaw command list " + name
+		return Command{}, Problem{Message: fmt.Sprintf("Studio Pro has no command %q", joinCommand(category, name)), Hint: hint}
+	}
+	var names []string
+	for _, m := range matches {
+		names = append(names, joinCommand(m.Category, m.Name))
+	}
+	return Command{}, Problem{
+		Message: fmt.Sprintf("%q is in more than one category: %s", name, strings.Join(names, "; ")),
+		Hint:    "name the category too",
+	}
+}
+
+func joinCommand(category, name string) string {
+	if category == "" {
+		return name
+	}
+	return category + " > " + name
+}
+
+func (st *Studio) commands(filter string) Result {
+	all := st.model().Commands()
+	if len(all) == 0 {
+		return Result{Message: "Studio Pro has not sent its command list."}
+	}
+	var out []Command
+	f := strings.ToLower(filter)
+	for _, c := range all {
+		if f == "" || strings.Contains(strings.ToLower(c.Category+" "+c.Name), f) {
+			out = append(out, c)
+		}
+	}
+	msg := fmt.Sprintf("%d Studio Pro command%s", len(out), plural(float64(len(out))))
+	if filter != "" {
+		msg += fmt.Sprintf(" match %q", filter)
+	}
+	return Result{Message: msg + ".", Data: out}
+}
+
+// commandSettle is how long a command's effects are gathered after the last
+// update Studio Pro sends.
+var commandSettle = 400 * time.Millisecond
+
+func (st *Studio) run(ctx context.Context, category, name string) (Result, error) {
+	cmd, err := FindCommand(st.model().Commands(), category, name)
+	if err != nil {
+		return Result{}, err
+	}
+	beforeChannels := st.channels()
+	seq := st.model().Seq()
+	if err := st.session.Invoke(ctx, cmd.Category, cmd.Name); err != nil {
+		return Result{}, err
+	}
+	st.settle(ctx, seq)
+	changes := st.model().ChangesSince(seq)
+	effect := st.summarize(beforeChannels, changes)
+	full := joinCommand(cmd.Category, cmd.Name)
+	data := map[string]any{"command": cmd, "changed": changes}
+	if effect == "" {
+		return Result{
+			Message: fmt.Sprintf("Ran %s; Studio Pro reported no change (view and editing commands do not report back).", full),
+			Data:    data,
+		}, nil
+	}
+	return Result{Message: fmt.Sprintf("Ran %s: %s.", full, effect), Data: data}, nil
+}
+
+// settle waits for the first update and then for a quiet gap, up to two
+// seconds in all.
+func (st *Studio) settle(ctx context.Context, seq uint64) {
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	quiet := time.NewTimer(commandSettle * 2)
+	defer quiet.Stop()
+	for {
+		wake := st.model().Changed()
+		select {
+		case <-wake:
+			if !quiet.Stop() {
+				select {
+				case <-quiet.C:
+				default:
+				}
+			}
+			quiet.Reset(commandSettle)
+		case <-quiet.C:
+			return
+		case <-deadline.C:
+			return
+		case <-ctx.Done():
+			return
+		case <-st.session.Done():
+			return
+		}
+	}
+}
+
+func (st *Studio) summarize(before []Channel, changes []string) string {
+	after := st.channels()
+	key := func(c Channel) string { return c.Path + "|" + c.Name + "|" + c.Kind }
+	was := map[string]bool{}
+	for _, c := range before {
+		was[key(c)] = true
+	}
+	now := map[string]bool{}
+	var parts []string
+	for _, c := range after {
+		now[key(c)] = true
+		if !was[key(c)] {
+			parts = append(parts, fmt.Sprintf("added %s (%s)", c.Name, kindWord(c.Kind)))
+		}
+	}
+	for _, c := range before {
+		if !now[key(c)] {
+			parts = append(parts, fmt.Sprintf("removed %s", c.Name))
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
+	var described []string
+	for _, path := range changes {
+		if strings.HasPrefix(path, "@") || strings.HasPrefix(path, "recorddiskspace/") ||
+			strings.HasPrefix(path, "activity/") || strings.HasSuffix(path, "/clip") {
+			continue
+		}
+		p, ok := st.schema.Lookup(path)
+		if !ok || p.Private() {
+			continue
+		}
+		d, _ := st.describe(p)
+		described = append(described, d)
+	}
+	sort.Strings(described)
+	if len(described) > 4 {
+		described = append(described[:4], fmt.Sprintf("and %d more", len(described)-4))
+	}
+	return strings.Join(described, ", ")
+}
+
+// Params lists catalog entries, one per path pattern.
+func Params(schema *dawschema.Catalog, filter string) Result {
+	params := schema.Patterns(filter)
+	var visible []dawschema.Param
+	for _, p := range params {
+		if !p.Private() {
+			visible = append(visible, p)
+		}
+	}
+	msg := fmt.Sprintf("%d parameter%s", len(visible), plural(float64(len(visible))))
+	if filter != "" {
+		msg += fmt.Sprintf(" match %q", filter)
+	}
+	return Result{Message: msg + "; <n> is a channel or slot number.", Data: visible}
+}
+
+func (st *Studio) unconfirmed(err error, what string) error {
+	switch {
+	case errors.Is(err, ErrUnconfirmed):
+		return Problem{
+			Message: what + " was sent, but Studio Pro did not confirm it.",
+			Hint:    "check Studio Pro: a dialog may be open, or the song may be busy",
+		}
+	case errors.Is(err, ErrConnectionClosed):
+		return Problem{
+			Message: "Studio Pro closed the connection.",
+			Hint:    "make sure Studio Pro is still open, then try again",
+		}
+	}
+	return err
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
+func boolWire(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
+
+func trim(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+
+func plural(n float64) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func lastSegment(path string) string {
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
