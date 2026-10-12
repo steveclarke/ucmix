@@ -108,19 +108,12 @@ func (st *Studio) insert(ctx context.Context, channel, plugin, preset string) (R
 	if err != nil {
 		return Result{}, err
 	}
-	all, err := loadPlugins()
+	p, preset, fav, err := pickPlugin(plugin, preset)
 	if err != nil {
-		return Result{}, Problem{
-			Message: "Could not read the list of plug-ins Studio Pro has scanned.",
-			Hint:    "open Studio Pro once so it writes its plug-in list, then try again",
-		}
-	}
-	p, err := dawplugins.Find(all, plugin)
-	if err != nil {
-		return Result{}, Problem{Message: err.Error(), Hint: "list plug-ins with: ucdaw plugins " + plugin}
+		return Result{}, err
 	}
 	if p.Instrument() {
-		return Result{}, Problem{Message: fmt.Sprintf("%s is an instrument, not an effect", p.Name), Hint: "add an instrument track for it instead"}
+		return Result{}, Problem{Message: fmt.Sprintf("%s is an instrument, not an effect", p.Name), Hint: "add an instrument track for it: ucdaw instrument add " + p.Name}
 	}
 	if d, open := st.model().Dialog(); open {
 		return Result{}, dialogProblem(d)
@@ -163,6 +156,9 @@ func (st *Studio) insert(ctx context.Context, channel, plugin, preset string) (R
 		msg += fmt.Sprintf(" with preset %s", loaded)
 	default:
 		msg += fmt.Sprintf("; Studio Pro has no preset %q for it, so it has its default settings", preset)
+	}
+	if fav != nil {
+		msg += fmt.Sprintf(", from your favorite %q", fav.Name)
 	}
 	return Result{Message: msg + ".", Data: data}, nil
 }

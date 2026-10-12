@@ -71,6 +71,21 @@ type sectionIn struct {
 type trackIn struct {
 	Format string `json:"format,omitempty" jsonschema:"mono (default) or stereo"`
 	Name   string `json:"name,omitempty" jsonschema:"name for the new track, e.g. Guitar"`
+	Plugin string `json:"plugin,omitempty" jsonschema:"optional effect plug-in or favorite to put on the new track, e.g. Guitar Rig 7 or my clean guitar"`
+	Preset string `json:"preset,omitempty" jsonschema:"optional Studio Pro preset for plugin; a favorite brings its own"`
+}
+
+type instrumentIn struct {
+	Instrument string `json:"instrument" jsonschema:"virtual instrument name as list_plugins shows it (Syntronik 2, MODO BASS 2) or a favorite (my worship synth)"`
+	Name       string `json:"name,omitempty" jsonschema:"name for the new track, e.g. Pad"`
+	Preset     string `json:"preset,omitempty" jsonschema:"optional Studio Pro preset for the instrument; a favorite brings its own"`
+}
+
+type favoriteIn struct {
+	Action string `json:"action" jsonschema:"list, set or remove"`
+	Name   string `json:"name,omitempty" jsonschema:"set and remove: the musician's words for the sound, e.g. clean guitar or worship synth"`
+	Plugin string `json:"plugin,omitempty" jsonschema:"set: the effect or instrument, as list_plugins shows it"`
+	Preset string `json:"preset,omitempty" jsonschema:"set: the plug-in's Studio Pro preset (a subfolder goes first: Misc/50 Hz Removal)"`
 }
 
 type insertIn struct {
@@ -182,12 +197,34 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 		Description: "Add a mono or stereo audio track and name it. The new track ends up selected. " +
 			"Returns one line such as \"Added mono audio track Guitar.\" Undo with run_command Edit / Undo.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in trackIn) (*mcp.CallToolResult, any, error) {
-		return call(ctx, daw.Request{Op: "add_track", Action: in.Format, Name: in.Name}, false)
+		return call(ctx, daw.Request{Op: "add_track", Action: in.Format, Name: in.Name, Plugin: in.Plugin, Preset: in.Preset}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "add_instrument",
+		Description: "Add an instrument track with a virtual instrument loaded (Syntronik 2, SampleTank 4, MODO BASS 2…) or one of the musician's favorites, " +
+			"name it, and read the preset back (Studio Pro shows the instrument's window for a moment to report it). " +
+			"For \"three backing tracks: pad, keys, bass\" call it three times. Undo with run_command Edit / Undo.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in instrumentIn) (*mcp.CallToolResult, any, error) {
+		return call(ctx, daw.Request{Op: "add_instrument", Plugin: in.Instrument, Name: in.Name, Preset: in.Preset}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "favorite",
+		Description: "The musician's favorite sounds: their words (\"clean guitar\", \"worship synth\") mapped to a plug-in and preset. " +
+			"list them; set one when they say \"remember this as my clean guitar\" (use the plug-in and preset just used); remove one. " +
+			"add_track, add_insert and add_instrument accept a favorite's name wherever they take a plug-in. Works without Studio Pro.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in favoriteIn) (*mcp.CallToolResult, any, error) {
+		res, err := daw.Favorites(daw.Request{Op: "favorite", Action: in.Action, Name: in.Name, Plugin: in.Plugin, Preset: in.Preset})
+		if err != nil {
+			return failure(err), nil, nil
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: res.Message}}}, nil, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "add_insert",
-		Description: "Put an effect plug-in on a channel, after its existing inserts, optionally loading one of its Studio Pro presets, " +
+		Description: "Put an effect plug-in (or a favorite) on a channel, after its existing inserts, optionally loading one of its Studio Pro presets, " +
 			"and confirm both. Returns one line such as \"Added Guitar Rig 7 to Guitar (insert 1) with preset Clean.\" " +
 			"If the preset is not found the plug-in still goes in with default settings and the answer says so. Undo with run_command Edit / Undo.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in insertIn) (*mcp.CallToolResult, any, error) {

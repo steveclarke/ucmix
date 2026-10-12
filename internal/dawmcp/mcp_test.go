@@ -66,6 +66,8 @@ func TestToolsMapToRequests(t *testing.T) {
 		{"list_plugins", map[string]any{"filter": "rig"}, daw.Request{Op: "plugins", Filter: "rig"}},
 		{"run_command", map[string]any{"category": "Edit", "name": "Undo"}, daw.Request{Op: "run", Category: "Edit", Name: "Undo"}},
 		{"run_command", map[string]any{"category": "Transport", "name": "Forward Bar", "args": map[string]any{"Bars": "4"}}, daw.Request{Op: "run", Category: "Transport", Name: "Forward Bar", Args: map[string]string{"Bars": "4"}}},
+		{"add_track", map[string]any{"name": "Guitar", "plugin": "my clean guitar"}, daw.Request{Op: "add_track", Name: "Guitar", Plugin: "my clean guitar"}},
+		{"add_instrument", map[string]any{"instrument": "Syntronik 2", "name": "Pad", "preset": "Warm"}, daw.Request{Op: "add_instrument", Plugin: "Syntronik 2", Name: "Pad", Preset: "Warm"}},
 		{"audio_edit", map[string]any{"edit": "split", "track": "Guitar", "bar": 9}, daw.Request{Op: "audio", Action: "split", Path: "Guitar", Value: "9"}},
 		{"section", map[string]any{"action": "repeat", "section": "Chorus 1", "target": "Bridge"}, daw.Request{Op: "section", Action: "repeat", Section: "Chorus 1", Target: "Bridge"}},
 		{"section", map[string]any{"action": "add", "name": "Verse, Chorus", "bars": 4}, daw.Request{Op: "section", Action: "add", Name: "Verse, Chorus", Bars: 4}},
@@ -117,12 +119,25 @@ func TestEveryToolHasADescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 15 {
+	if len(tools.Tools) != 17 {
 		t.Errorf("tools = %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
 		if len(tool.Description) < 40 {
 			t.Errorf("%s description too thin", tool.Name)
 		}
+	}
+}
+
+func TestFavoriteToolWorksWithoutStudioPro(t *testing.T) {
+	t.Setenv("UCDAW_FAVORITES", t.TempDir()+"/favorites.json")
+	engine := &fakeEngine{}
+	cs := connect(t, engine)
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "favorite", Arguments: map[string]any{"action": "list"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text(t, res) != "No favorites yet." || len(engine.got) != 0 {
+		t.Errorf("favorite list = %q, engine calls %d", text(t, res), len(engine.got))
 	}
 }

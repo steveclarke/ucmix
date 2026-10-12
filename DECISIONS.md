@@ -291,3 +291,33 @@ Crossfaded the joins in Take, with 50 ms fades on every edit. …
 $ ucdaw audio quantize Take
 Quantized Take to the quantize grid. …
 ```
+
+## Step 3: favorites and instrument tracks (02:25–03:00 NDT)
+
+- **Instrument tracks.** Studio Pro's `audioedit.package` script (`Insert FX.js`) has `Track / Add Instrument and Track`: it reads `mode`, `cid`, `preset` and `openEditor` from its arguments, makes a new instrument track, loads the instrument and connects it. `openEditor: "0"` keeps the instrument window closed (window list checked after every add). Live: Mojito, Syntronik 2 and MODO BASS 2 each added in 0.4–1.5 s.
+- The remote shows an instrument track as its instrument's channel (`type AudioSynth`, label = instrument name). Renaming that channel (`PS label`) renames the track too (seen on screen: track header "Pad").
+- **Instrument preset readback.** Studio Pro reports `surface/focusPresetName` only for the device in focus. `Console / Show Instrument Editor` toggles the selected instrument's window: ucdaw opens it, reads the preset, and closes it again (a moment on screen), and only when a preset was asked for and no other editor is in focus. Live: Mojito with preset `Transformator` read back as "Transformator"; with `LuvErasor` → "(preset LuvErasor)". VSTs that report no preset name fall back to checking the preset file.
+- **Preset files.** Studio Pro presets live in `~/Documents/Studio One/Presets/<vendor>/<plug-in>/` (user; empty on this Mac) and `Studio Pro 8.app/Contents/Presets/<vendor>/<plug-in>/` (factory). `favorite set` warns when the named preset file does not exist yet, so Steve knows to save it from the plug-in window first.
+- **Favorites** (`internal/dawfav`): `~/Library/Application Support/ucdaw/favorites.json`, 0600 in a 0700 directory, written atomically, at most 500 entries and 1 MB, control characters stripped. Matching ignores case, punctuation and the words "my", "the", "preset", "sound", "usual", so "my clean preset" finds "clean", and a unique partial match ("clean" → "clean guitar") works. `insert`, `track add --insert` and `instrument add` resolve favorites; an explicit `--preset` overrides the favorite's. Spelling is US ("favorite") because the repo's linter enforces it.
+- Live run (serve, 02:55 NDT; the test favorites were removed afterwards, so Steve's file is empty):
+
+```
+$ ucdaw favorite set "pad" Mojito --preset LuvErasor
+Remembered pad: Mojito with preset LuvErasor (instrument).
+$ ucdaw favorite set "clean guitar" "Guitar Rig 7" --preset Clean
+Remembered clean guitar: Guitar Rig 7 with preset Clean; Studio Pro has no preset file "Clean" for Guitar Rig 7 yet, so save it from the plug-in window's preset menu.
+$ ucdaw instrument add "my pad" --name Pad2
+Added instrument track Pad2 with Mojito (preset LuvErasor), from your favourite "pad".
+$ ucdaw instrument add "worship synth" --name Keys
+Added instrument track Keys with Syntronik 2, from your favourite "worship synth".
+$ ucdaw instrument add bass --name Bass
+Added instrument track Bass with MODO BASS 2, from your favourite "bass".
+$ ucdaw track add --name Gtr --insert "Pro EQ" --preset "Misc/50 Hz Removal"
+Added mono audio track Gtr; added Pro EQ to Gtr (insert 1) with preset 50 Hz Removal.
+$ ucdaw insert Gtr "my clean guitar"
+Added Guitar Rig 7 to Gtr (insert 2); Studio Pro has no preset "Clean" for it, so it has its default settings, from your favourite "clean guitar".
+```
+
+  (Messages then said "favourite"; now "favorite".) All undone afterwards.
+- **Known glitch (round 1 code):** Undo reports while removing several renamed channels in a row named the wrong channel twice ("removed Guitar Rig 7 from X" for Gtr). The song itself was right. Cause: channels renumber as one is removed and the label updates arrive across the settle window. Logged, not fixed tonight.
+- An arranger duplicate with content once needed two Undo presses: the first reported no change, the second reverted the sections and content.

@@ -102,6 +102,8 @@ func newRootCmd() *cobra.Command {
 		newInsertCmd(o),
 		newSectionCmd(o),
 		newAudioCmd(o),
+		newInstrumentCmd(o),
+		newFavoriteCmd(o),
 		newPluginsCmd(o),
 		newServeCmd(o),
 		newMCPCmd(o),
@@ -485,15 +487,15 @@ func newTrackCmd(o *options) *cobra.Command {
 		Use:   "track",
 		Short: "Add tracks",
 	}
-	var name string
+	var name, plugin, preset string
 	add := &cobra.Command{
 		Use:       "add [mono|stereo]",
-		Short:     "Add an audio track (mono unless you say stereo), optionally named",
-		Example:   "  ucdaw track add mono --name Guitar",
+		Short:     "Add an audio track (mono unless you say stereo), optionally named and with a plug-in",
+		Example:   "  ucdaw track add mono --name Guitar\n  ucdaw track add --name Guitar --insert \"my clean guitar\"",
 		Args:      cobra.MaximumNArgs(1),
 		ValidArgs: []string{"mono", "stereo"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req := daw.Request{Op: "add_track", Name: name}
+			req := daw.Request{Op: "add_track", Name: name, Plugin: plugin, Preset: preset}
 			if len(args) == 1 {
 				req.Action = args[0]
 			}
@@ -501,6 +503,8 @@ func newTrackCmd(o *options) *cobra.Command {
 		},
 	}
 	add.Flags().StringVar(&name, "name", "", "name for the new track")
+	add.Flags().StringVar(&plugin, "insert", "", "effect plug-in or favorite to put on the new track")
+	add.Flags().StringVar(&preset, "preset", "", "Studio Pro preset for --insert")
 	cmd.AddCommand(add)
 	return cmd
 }
@@ -508,7 +512,7 @@ func newTrackCmd(o *options) *cobra.Command {
 func newInsertCmd(o *options) *cobra.Command {
 	var preset string
 	cmd := &cobra.Command{
-		Use:   "insert <channel> <plug-in>",
+		Use:   "insert <channel> <plug-in or favorite>",
 		Short: "Put a plug-in on a channel's inserts, optionally with one of its presets",
 		Long: "Adds the plug-in after the channel's existing inserts. <channel> is a track name,\n" +
 			"a number, or a path; <plug-in> is a name from `ucdaw plugins`. --preset loads one of\n" +

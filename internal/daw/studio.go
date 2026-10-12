@@ -33,6 +33,10 @@ type Request struct {
 	Section string `json:"section,omitempty"`
 	Target  string `json:"target,omitempty"`
 	Where   string `json:"where,omitempty"`
+	// Plugin and Preset name a plug-in (or a favorite) for add_track and
+	// add_instrument, and for favorite set.
+	Plugin string `json:"plugin,omitempty"`
+	Preset string `json:"preset,omitempty"`
 }
 
 // Result is what happened, in one line, plus structured detail for --json.
@@ -105,7 +109,20 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 	case "dump":
 		return st.dump(req.Filter), nil
 	case "add_track":
-		return st.addTrack(ctx, req.Action, req.Name)
+		res, err := st.addTrack(ctx, req.Action, req.Name)
+		if err != nil || strings.TrimSpace(req.Plugin) == "" {
+			return res, err
+		}
+		data, _ := res.Data.(map[string]string)
+		ins, err := st.insert(ctx, data["path"], req.Plugin, req.Preset)
+		if err != nil {
+			return Result{}, Problem{Message: strings.TrimSuffix(res.Message, ".") + ", but " + lowerFirst(Problem{Message: err.Error()}.Sentence())}
+		}
+		return Result{Message: strings.TrimSuffix(res.Message, ".") + "; " + lowerFirst(ins.Message), Data: ins.Data}, nil
+	case "add_instrument":
+		return st.addInstrument(ctx, req)
+	case "favorite":
+		return Favorites(req)
 	case "insert":
 		return st.insert(ctx, req.Path, req.Name, req.Value)
 	case "plugins":
@@ -595,7 +612,7 @@ func kindWord(kind string) string {
 	switch kind {
 	case "AudioTrack":
 		return "audio"
-	case "MusicTrack", "InstrumentTrack":
+	case "MusicTrack", "InstrumentTrack", "AudioSynth":
 		return "instrument"
 	case "AudioOutput":
 		return "output"
@@ -978,4 +995,11 @@ func lastSegment(path string) string {
 		return path[i+1:]
 	}
 	return path
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
 }
