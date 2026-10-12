@@ -13,9 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # golangci-lint is built with Go 1.26 and cannot load Go 1.27 packages
       - uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.3

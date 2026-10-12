@@ -45,9 +45,8 @@ func TestEnsurePrivateDirRefusesSymlinkAndOtherOwner(t *testing.T) {
 	if err := ensurePrivateDir(link); err == nil {
 		t.Error("symlinked directory accepted")
 	}
-	orig := currentUID
-	currentUID = func() int { return orig() + 1 }
-	t.Cleanup(func() { currentUID = orig })
+	setUID(func() int { return os.Getuid() + 1 })
+	t.Cleanup(func() { setUID(os.Getuid) })
 	if err := ensurePrivateDir(target); err == nil || !strings.Contains(err.Error(), "another user") {
 		t.Errorf("other owner = %v", err)
 	}
@@ -70,9 +69,8 @@ func TestServeRefusesToReplaceNonSocket(t *testing.T) {
 
 func TestClientRefusesServerOfAnotherUser(t *testing.T) {
 	client, _ := startServer(t)
-	orig := currentUID
-	currentUID = func() int { return orig() + 1 }
-	t.Cleanup(func() { currentUID = orig })
+	setUID(func() int { return os.Getuid() + 1 })
+	t.Cleanup(func() { setUID(os.Getuid) })
 	if client.Available() {
 		t.Error("Available trusted a server run by another user")
 	}

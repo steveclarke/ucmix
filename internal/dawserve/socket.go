@@ -6,11 +6,19 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 )
 
-// currentUID is a test seam for the peer check.
-var currentUID = os.Getuid
+// uidFunc is a test seam for the peer check, swapped atomically because the
+// server goroutine reads it while a test may replace it.
+var uidFunc atomic.Pointer[func() int]
+
+func init() { setUID(os.Getuid) }
+
+func setUID(f func() int) { uidFunc.Store(&f) }
+
+func currentUID() int { return (*uidFunc.Load())() }
 
 // DefaultSocket is the serve socket inside a private per-user directory
 // (~/Library/Caches/ucdaw on macOS, $XDG_RUNTIME_DIR/ucdaw on Linux), created
