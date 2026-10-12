@@ -52,6 +52,7 @@ type Model struct {
 	strs     map[string]string
 	commands []Command
 	dialog   *Dialog
+	events   map[string][]Event
 	seq      uint64
 	log      []Change
 	changed  chan struct{}
@@ -61,6 +62,7 @@ type Model struct {
 func NewModel() *Model {
 	return &Model{
 		nums:    map[string]float64{},
+		events:  map[string][]Event{},
 		strs:    map[string]string{},
 		changed: make(chan struct{}),
 	}
@@ -225,6 +227,21 @@ func (m *Model) ApplyFrame(f proto.Frame) error {
 			v := float64(binary.LittleEndian.Uint32(raw[:4]))
 			m.mutate(func(r func(string)) { m.setNum(key, v, r) })
 		}
+	case codeBO:
+		if !bytes.HasPrefix(f.Payload, []byte("EvDL")) {
+			return nil
+		}
+		list, err := ParseEventList(f.Payload)
+		if err != nil {
+			return err
+		}
+		if len(m.events) >= 16 && m.events[list.Kind] == nil {
+			return nil // only a handful of kinds exist
+		}
+		m.mutate(func(r func(string)) {
+			m.events[list.Kind] = list.Events
+			r("@events/" + list.Kind)
+		})
 	case codeZM:
 		body, err := DecodeZM(f.Payload)
 		if err != nil {
@@ -235,7 +252,18 @@ func (m *Model) ApplyFrame(f proto.Frame) error {
 	return nil
 }
 
-var codeZM = [2]byte{'Z', 'M'}
+var (
+	codeZM = [2]byte{'Z', 'M'}
+	codeBO = [2]byte{'B', 'O'}
+)
+
+// Events returns one event list: "Mark" (markers) or "Arng" (arranger
+// sections).
+func (m *Model) Events(kind string) []Event {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]Event(nil), m.events[kind]...)
+}
 
 // DecodeZM inflates a ZM payload: a 4-byte little-endian inflated length
 // followed by a zlib stream of JSON.

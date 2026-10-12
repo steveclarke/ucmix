@@ -30,6 +30,8 @@ func FuzzModelApplyFrame(f *testing.F) {
 		f.Add(code, []byte("key\x00\x00"))
 		f.Add(code, []byte("\x05\x00\x00\x00x^garbage"))
 	}
+	f.Add("BO", liveSections)
+	f.Add("BO", liveMarkers)
 	f.Add("ZM", zm(&testing.T{}, `{"id": "Synchronize","children": {"a": {"values": {"b": [1]}}}}`).Payload)
 	f.Fuzz(func(t *testing.T, code string, payload []byte) {
 		if len(code) != 2 {

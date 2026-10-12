@@ -458,6 +458,8 @@ type Song struct {
 	Playing  bool      `json:"playing"`
 	Loop     bool      `json:"loop"`
 	Channels []Channel `json:"channels"`
+	Sections []Event   `json:"sections,omitempty"`
+	Markers  []Event   `json:"markers,omitempty"`
 }
 
 func (st *Studio) channels() []Channel {
@@ -508,7 +510,38 @@ func (st *Studio) Song() Song {
 		Playing:  st.playing(),
 		Loop:     st.num("transport/loop") >= 0.5,
 		Channels: st.channels(),
+		Sections: st.model().Events("Arng"),
+		Markers:  userMarkers(st.model().Events("Mark")),
 	}
+}
+
+// userMarkers drops the song's built-in start and end markers.
+func userMarkers(all []Event) []Event {
+	var out []Event
+	for _, e := range all {
+		if e.Tag == "Mark" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// clock renders seconds as m:ss.
+func clock(seconds float64) string {
+	s := int(math.Round(seconds))
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}
+
+func eventSummary(events []Event) string {
+	parts := make([]string, len(events))
+	for i, e := range events {
+		name := e.Name
+		if name == "" {
+			name = fmt.Sprintf("#%d", i+1)
+		}
+		parts[i] = fmt.Sprintf("%s %s", name, clock(e.Start))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func kindWord(kind string) string {
@@ -552,10 +585,17 @@ func (st *Studio) song() Result {
 	msg := fmt.Sprintf("%s bpm, %s, click %s, loop %s, %s; ", trim(song.Tempo), song.Meter, onOff(song.Click), onOff(song.Loop), state)
 	switch len(tracks) {
 	case 0:
-		msg += "no tracks yet."
+		msg += "no tracks yet"
 	default:
-		msg += fmt.Sprintf("%d channel%s: %s.", len(tracks), plural(float64(len(tracks))), strings.Join(tracks, ", "))
+		msg += fmt.Sprintf("%d channel%s: %s", len(tracks), plural(float64(len(tracks))), strings.Join(tracks, ", "))
 	}
+	if len(song.Sections) > 0 {
+		msg += "; sections: " + eventSummary(song.Sections)
+	}
+	if len(song.Markers) > 0 {
+		msg += "; markers: " + eventSummary(song.Markers)
+	}
+	msg += "."
 	return Result{Message: msg, Data: song}
 }
 
