@@ -1,6 +1,6 @@
 ---
 name: ucdaw
-description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to start a new song, play, stop, loop, set the click or tempo, import audio files or a folder of stems (assemble a mix from stems), add an audio or instrument track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, edit the arrangement (add, repeat, move, delete, rename sections), edit audio (fade, split, trim, crossfade, quantize), set a fader in dB, remember a favorite sound, rename/mute/solo a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
+description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to start a new song, play, stop, loop, set the click or tempo, import audio files or a folder of stems (assemble a mix from stems), add an audio or instrument track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, edit the arrangement (add, repeat, move, delete, rename sections), edit audio (fade, split, trim, crossfade, quantize), set a fader or input trim in dB, measure stems (levels, loudness, silent or clipped exports), gain-stage, mix or rebalance a song from the musician's ear notes ("drums a touch loud", "can't hear the bass"), remember a favorite sound, rename/mute/solo a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
 ---
 
 # ucdaw — Studio Pro over UCNET
@@ -47,6 +47,28 @@ ucdaw plugins rig                    # installed effects and instruments
 ucdaw presets "Pro EQ" [filter]      # a plug-in's Studio Pro presets
 ucdaw state                          # song summary; `ucdaw state mixer/channel/ch1` for every value
 ```
+
+## Mixing: measure, trim, gain-stage
+
+**Read [mixing.md](mixing.md) before changing any level.** It is the
+engineer's workflow: measure first, trim fixes the stem, faders set the
+balance, never normalize to peak, never reset the musician's balance without
+asking, ear notes become small dB moves, every change reported with numbers.
+
+```bash
+ucdaw analyze                          # every audio track's stem in the open song
+ucdaw analyze Bass Drums               # the stems imported onto these tracks
+ucdaw analyze ~/Music/stems            # files or folders; no Studio Pro needed
+ucdaw trim Bass 20 | -6 | --up 3       # input trim (Input Gain), -24..+24 dB
+ucdaw gainstage [tracks] [--target -18]  # every trim to the target; faders untouched
+```
+
+`analyze` reports per stem: average (RMS over active audio; gaps below
+-60 dBFS left out), peak, integrated LUFS (ITU-R BS.1770), active time, silent
+("Loops is silent: an empty export"), clipping, and the trim that brings it to
+the -18 dBFS target. A track name is resolved from ucdaw's import log, or from
+the song's waveform cache plus Spotlight (checked by length in frames).
+Negative levels work as plain arguments: `ucdaw fader Drums -3`.
 
 ## Starting a new song
 
@@ -171,7 +193,7 @@ dB for faders, sends and cue mixes, list entries by name.
 
 ## MCP tools (`studio-pro-ucnet`)
 
-`get_song`, `new_song` (tempo, click), `transport`, `click`, `tempo`, `add_track`, `add_insert`,
+`get_song`, `new_song` (tempo, click), `analyze_audio`, `trim`, `gain_stage`, `transport`, `click`, `tempo`, `add_track`, `add_insert`,
 `add_instrument`, `import_audio`, `section`, `audio_edit`, `fader`, `favorite`,
 `list_plugins`, `list_presets`, `get_values`, `get_param`, `set_param`,
 `list_params`, `list_commands`, `run_command` (with `args`). Start with

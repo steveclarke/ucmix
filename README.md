@@ -256,13 +256,24 @@ $ ucdaw fader Pad 0
 Pad at 0 dB (was -3 dB).
 $ ucdaw import ~/Music/stems
 Imported 4 stems onto new tracks at bar 1: Kick (mono), Bass DI (stereo), Pad (stereo) and Lead Vox (mono). Skipped notes.txt (not audio). Tracks read back; Studio Pro does not report clips to remotes, so placement is not read back (Studio Pro drew each file's waveform, so it read every file).
+$ ucdaw analyze Bass Loops
+Measured 2 stems against a -18 dBFS average target:
+Bass: average -46.5 dBFS over 4:07 of 4:45, peak -30.5 dBFS, -45.5 LUFS; trim +24 dB, as far as the input trim goes (it stops at +24 dB): reaching -18 dBFS needs +28.5 dB, so it stays 4.5 dB short.
+Loops is silent: an empty export (peak -62 dBFS over 4:45). Re-export it before mixing.
+$ ucdaw trim Bass 20
+Bass trim +20 dB (was 0 dB).
+$ ucdaw gainstage
+Gain-staged 7 tracks to a -18 dBFS average; faders untouched:
+Drums: trim 0 → +5.7 dB (stem averages -23.7 dBFS).
+…
 ```
 
 Commands: `discover`, `state [prefix]`, `state record <file>`, `song new [--tempo bpm] [--click on|off]`,
 `transport play|stop|rtz|loop`, `click`, `tempo`, `track add`, `insert`,
 `instrument add`, `section list|add|duplicate|repeat|move|delete|rename|goto|play`,
 `audio fade-out|fade-in|split|trim-start|trim-end|crossfade|quantize`,
-`fader`, `import <file|folder>... [--onto track] [--at bar]`, `favorite set|list|remove`, `plugins`, `presets`, `param get|set`,
+`fader`, `trim`, `analyze [file|folder|track]... [--target dBFS]`, `gainstage [track]... [--target dBFS]`,
+`import <file|folder>... [--onto track] [--at bar]`, `favorite set|list|remove`, `plugins`, `presets`, `param get|set`,
 `params`, `command list|run [--arg name=value]`, `serve`, `mcp`.
 Every command takes `--json`.
 
@@ -276,6 +287,18 @@ one file at a time; it hands files to Studio Pro with `open`, so it works only w
 Studio Pro on the same Mac. Favorites (`favorite set "clean guitar" "Guitar Rig 7"
 --preset Clean`) are kept in the user config folder, readable only by the user.
 
+Mixing: `analyze` measures stems (files and folders on this Mac without Studio Pro,
+or the stem on a named track, or every audio track): average level (RMS over active
+audio, gaps below -60 dBFS left out), peak, integrated loudness (ITU-R BS.1770-4,
+matches ffmpeg's ebur128 to 0.1 LU), active time, empty exports, clipping, and the
+input trim that brings each to the -18 dBFS target. It streams WAV/RF64/AIFF/AIFC
+(8/16/24/32-bit integer, 32/64-bit float): a 300 MB stem takes about 1.3 s in 15 MB
+of memory. `trim` sets a channel's input gain (-24 to +24 dB, before plug-ins and
+fader); `gainstage` sets every audio track's trim to the target and leaves faders,
+mutes and pans alone. Level arguments may be negative (`ucdaw fader Drums -3`).
+Which file is on which track comes from ucdaw's own import log (`imports.json` in
+the user config folder), or from the song's waveform cache plus Spotlight.
+
 For Claude Code:
 
 ```console
@@ -283,7 +306,8 @@ $ go install ./cmd/ucdaw
 $ claude mcp add --scope user studio-pro-ucnet -- "$(go env GOPATH)/bin/ucdaw" mcp
 ```
 
-The agent skill is in `skills/ucdaw/SKILL.md`.
+The agent skill is in `skills/ucdaw/SKILL.md`; the mix engineer's workflow is in
+`skills/ucdaw/mixing.md` (and, in brief, in the MCP server's instructions).
 
 ## Library
 

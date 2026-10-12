@@ -471,3 +471,53 @@ $ ucdaw state --json   -> still "2026-10-12 Stephen Clarke(2)", 72 bpm (no third
 - A second new song on the same day is named with "(2)" appended, so the title always changes.
 - Left as is: the new song "2026-10-12 Stephen Clarke(2)" (unsaved, 72 bpm, click on) is the front tab; "2026-10-12 Stephen Clarke" stays open in its tab. Nothing saved or closed.
 - `just test`: 780 tests pass; `golangci-lint`: 0 issues on the ucdaw packages.
+
+# Mixing: analyze, trim, gain staging (2026-10-12, from 10:00 NDT)
+
+Steve's first real trial (remixing "The King Has Come" stems) showed what helps a musician who cannot measure: exact numbers from the stems themselves. His bass export averaged -47 dBFS against drums at -23.7, so no fader move could fix it; a +20 dB input trim did. Guessed fader cuts, peak-normalizing and resetting his balance to 0 dB all failed. This step makes measuring and gain staging part of ucdaw, and writes the engineer's workflow down for Claude.
+
+## Input gain on the wire
+
+- `mixer/channel/chN/inputfx/gain` (dawremote.xml range `InputGain`, -24..24, no curve) travels **normalized like every other ranged value, on a straight line in dB**: read live with a raw session, Bass at +20 dB is wire `0.91667` (44/48) and an untouched channel is `0.5` (0 dB). The trial notes called it "raw dB"; the units are dB, the wire is not. `param set … 20` already did the right conversion, which is why it read back 20.
+- `ucdaw trim <track> [dB] [--up|--down dB]` and MCP `trim` set it through the schema and read it back: "Bass trim +20 dB (was 0 dB)." Out of range is refused with the range named.
+
+## Negative levels on the command line
+
+- `ucdaw fader Drums -3` already worked (the fader command reads its own arguments); what failed was `param set <path> -6` ("unknown shorthand flag: '6'"), and `fader … --host X` (the fader parser knew only `--json` and `--direct`).
+- Now `fader`, `trim` and `param set` share one parser that takes every global flag (`--json`, `--direct`, `--host`, `--socket`, `--schema`, with or without `=`) anywhere and leaves negative numbers as arguments.
+
+## Measuring (`ucdaw analyze`, MCP `analyze_audio`)
+
+- The header parser now also records where the samples are and how they are stored: WAV format tag (PCM, float, or the SubFormat of `WAVE_FORMAT_EXTENSIBLE`), the `data` offset, AIFC compression (`NONE`/`twos`, `sowt` little-endian, `fl32`/`fl64`), the `SSND` offset. The declared data size is cut to the file's real end. Other AIFC encodings (µ-law, compressed) are refused by name.
+- Samples are streamed through a 1 MB buffer; the only thing that grows is one float per 100 ms (capped at ten hours, then "measured the first 10 hours only"). A 302 MB stereo 24-bit stem: 1.28 s, 15 MB resident. Up to four files are measured at once; at most 64 per call.
+- Average: plain RMS (a full-scale sine is -3.01 dBFS, not the AES17 +3 dB convention) over 100 ms windows whose RMS is at least -60 dBFS, so the gaps in a sparse part do not drag it down.
+- LUFS: ITU-R BS.1770-4. K-weighting biquads are recomputed for the file's rate from libebur128's analog prototypes; 400 ms blocks every 100 ms; -70 LUFS absolute and -10 LU relative gates. Tests: a 997 Hz sine at -20 dBFS reads -20.0 LUFS stereo and -23.0 mono at 44.1, 48 and 96 kHz; 10 kHz reads 3.4 LU above 1 kHz and 30 Hz 9.0 below, as ffmpeg's `ebur128` does. On Steve's eight real stems ucdaw's LUFS equals ffmpeg's to 0.1 LU on every stem (Drums -23.1, Percussion -39.7, Bass -45.5, Acoustic -34.4, Electric -26.5, Keys -34.6, Guides -23.8).
+- Silent: a peak below -60 dBFS ("Loops is silent: an empty export (peak -62 dBFS over 4:45). Re-export it before mixing."). Clipping: three or more consecutive full-scale samples in an integer file (a clean full-scale sine touches full scale once per cycle and is not clipping); any sample over full scale in a float file.
+- Suggested trim: target minus the average, to 0.1 dB, within -24..+24. When the range is not enough the line says how far short the stem stays (Steve's bass needs +28.5 dB; +24 leaves it 4.5 dB short). Target defaults to -18 dBFS (0 VU on digital consoles and analog-modeled plug-ins); `--target` takes -40 to -6.
+- Files and folders are measured on this Mac without Studio Pro (CLI and MCP both skip the engine). A track name measures the stem on that track; no arguments measures every audio track in the open song. Reading only: a test checks nothing is sent to Studio Pro.
+- Fuzzed `FuzzAnalyzeReader` (header parse plus full measurement on arbitrary bytes, with random truncation) 20 s, no panic.
+
+## Which file is on which track
+
+- Studio Pro does not tell remotes what a track plays. `ucdaw import` now appends each stem to `imports.json` in the user config folder (song title, track, path, time; 0600, written atomically, at most 2,000 records and 2 MB, control characters stripped, a damaged file ignored). Tests log to a temporary file (TestMain sets `UCDAW_IMPORTS`); an early test run had written test imports into the real log, cleaned out by hand.
+- For a song imported before that (Steve's remix), the song's `Cache/Images` waveform files name each audio file and its length in frames (`x<8 hex><file name><frames hex>.peak`). ucdaw names the cached files the way import names tracks (so "The King Has Come 129bpm - Bass.wav" is Bass), then looks for the file in the song's `Media` folder, the folders of logged imports, folders found earlier, and Spotlight (`mdfind -name`, 5 s, 1 MB, 50 results, cloud folders last), and takes the first with the same frame count. The song folder needs no `.song` file (an unsaved song has only `Cache`).
+- Spotlight takes about a second per name; folders it finds are remembered for the session, so the whole song (8 stems) measures in 2.9 s through serve the first time and 1.1 s for two stems after.
+
+## Gain staging (`ucdaw gainstage`, MCP `gain_stage`)
+
+- Measures each audio track's stem (or the named tracks) and sets its trim to the suggested value. The trim is computed from the file, so it replaces an existing trim rather than adding to it. Writes only `inputfx/gain` paths (a test fails on any other write); faders are read before and after and the answer says "faders untouched" only if none moved. Silent stems and tracks without a stem are left alone and named. Already at the value: "trim already +5.7 dB", nothing sent.
+
+## Mixing skill and MCP instructions
+
+- `skills/ucdaw/mixing.md` (linked first from SKILL.md's mixing section) is written for Claude as the engineer: measure first; never normalize to peak; never reset the musician's balance without asking; trim fixes the stem, fader sets the balance; ear notes to dB ("a touch" 1-2, "a bit" 3, "a lot" 6); one change at a time; every change with numbers; broken exports flagged; static mix from the foundation; reference at matched loudness; bass judged on headphones, not laptop speakers. Sources cited: Anderton (PC Audio Labs), Nail the Mix, Sound On Sound (Houghton), iZotope, Mastering The Mix, Soundbridge, Owsinski.
+- Claude Desktop has no skills, so the MCP server's instructions carry the same workflow in one paragraph, and the `fader`, `trim`, `analyze_audio` and `gain_stage` descriptions say when to use each. 24 tools.
+
+## Live test (10:23–10:30 NDT, Studio Pro 8.0.2, serve restarted with the new build, `--host 192.168.77.78`)
+
+- Read-only against Steve's open remix ("2026-10-12 Stephen Clarke(3)", playing when found; nothing sent to it): `ucdaw analyze` measured all eight tracks from the waveform cache plus Spotlight; numbers as above.
+- `ucdaw song new --tempo 129 --click off` → "2026-10-12 Stephen Clarke(4)"; imported the eight base stems (Drums, Percussion, Loops, Bass, Acoustic, Electric, Keys, Guides; not the "(2)"/"(3)" copies or Click) in 10.7 s.
+- On the new song: `fader Drums -2`, `fader Keys --down 1.5` (a stand-in for Steve's balance); `trim Bass` 0 → 20 → -6 → `--up 3` → -3; `trim Bass 30` refused; `param set …/ch4/inputfx/gain -12` read back -12.
+- `ucdaw gainstage` (2.1 s): Drums +5.7, Percussion +24 (3.5 dB short), Loops left alone (silent), Bass -12 → +24 (4.5 dB short), Acoustic +21.4, Electric +10.8, Keys +19.5, Guides +8.7; "faders untouched". Read back over a fresh `--direct` session: every trim as reported; `state` still shows Drums -2 dB and Keys -1.5 dB. A second `gainstage Drums`: "trim already +5.7 dB".
+- MCP over stdio (`ucdaw mcp`): `analyze_audio {tracks: [Bass]}` and `trim {track: Bass}` answered as the CLI does.
+- Left as is: the test song "(4)" is the front tab, unsaved; Steve's remix "(3)" is in the previous tab, untouched. Nothing saved or closed; playback not started.
+- `just test`: all pass; `golangci-lint`: 0 issues on the ucdaw packages.
