@@ -216,3 +216,9 @@ A review agent read the whole branch. Fixed, each with a test where it can be te
   `Track > Add Insert to Selected Channels opened the "Add Insert to Selected Channels" dialog, which needs choices ucdaw cannot make; canceled it.` No dialog window remained (window list checked); then Undo removed T.
 - Two Undos during the night reported no change (one while the dialog was blocking Studio Pro, one after the insert tests). In an empty song they most likely did nothing.
 - Final song state: `120 bpm, 4/4, click on, loop off, stopped; no tracks yet.` Loop range 0–2 bars remains from the loop test.
+
+# Round 2 (2026-10-12, from 00:57 NDT)
+
+## Reconnect: skipped on Steve's instruction
+
+- Change from Steve via the coordinator (01:05 NDT): skip step 5 entirely. Studio Pro is not quit, relaunched or restarted tonight, and nothing is done that could disconnect it. Reconnect stays as written in round 1 and is listed in the hand-back note as "to test with Steve".
