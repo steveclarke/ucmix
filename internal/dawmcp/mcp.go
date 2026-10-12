@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/steveclarke/ucmix/internal/daw"
@@ -47,6 +48,14 @@ type commandIn struct {
 	Category string            `json:"category" jsonschema:"command category exactly as list_commands shows it, e.g. Track"`
 	Name     string            `json:"name" jsonschema:"command name exactly as list_commands shows it, e.g. Add Audio Track (mono)"`
 	Args     map[string]string `json:"args,omitempty" jsonschema:"optional command arguments as a Studio Pro macro carries them, e.g. {\"Bars\": \"4\"} for Transport / Forward Bar; a command that needs arguments and gets none opens a dialog, which ucdaw cancels"`
+}
+
+type audioIn struct {
+	Edit    string  `json:"edit" jsonschema:"one of: fade-out, fade-in, split, trim-start, trim-end, crossfade, quantize"`
+	Track   string  `json:"track" jsonschema:"track name (Guitar), number (2) or path"`
+	Bar     int     `json:"bar,omitempty" jsonschema:"split, trim-start, trim-end: the bar number (bar 1 is the song start)"`
+	Bars    float64 `json:"bars,omitempty" jsonschema:"fade-out, fade-in: fade length in whole bars (default 1)"`
+	Seconds float64 `json:"seconds,omitempty" jsonschema:"crossfade: fade length in seconds (default 0.01)"`
 }
 
 type sectionIn struct {
@@ -199,6 +208,20 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			"Commands act on the current selection, like the menu items they are. Undo with category Edit, name Undo.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in commandIn) (*mcp.CallToolResult, any, error) {
 		return call(ctx, daw.Request{Op: "run", Category: in.Category, Name: in.Name, Args: in.Args}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "audio_edit",
+		Description: "Edit the audio on one track with Studio Pro's own editing commands, on every event of that track: " +
+			"fade-out or fade-in (\"fade out the last bar\", \"crossfade the end of the guitar take\" is a fade-out), split at a bar, " +
+			"trim the start or end to a bar, crossfade (joins overlapping events and puts short fades on every edit), quantize. " +
+			"Studio Pro does not report audio events to remotes, so the answer says the edit was sent but not read back. Undo with run_command Edit / Undo.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in audioIn) (*mcp.CallToolResult, any, error) {
+		req := daw.Request{Op: "audio", Action: in.Edit, Path: in.Track, Bars: in.Bars, Seconds: in.Seconds}
+		if in.Bar > 0 {
+			req.Value = strconv.Itoa(in.Bar)
+		}
+		return call(ctx, req, false)
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

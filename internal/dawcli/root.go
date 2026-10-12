@@ -101,6 +101,7 @@ func newRootCmd() *cobra.Command {
 		newTrackCmd(o),
 		newInsertCmd(o),
 		newSectionCmd(o),
+		newAudioCmd(o),
 		newPluginsCmd(o),
 		newServeCmd(o),
 		newMCPCmd(o),

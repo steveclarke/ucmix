@@ -112,6 +112,8 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return Plugins(req.Filter)
 	case "section":
 		return st.section(ctx, req)
+	case "audio":
+		return st.audio(ctx, req)
 	}
 	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
 }

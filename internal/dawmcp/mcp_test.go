@@ -66,6 +66,7 @@ func TestToolsMapToRequests(t *testing.T) {
 		{"list_plugins", map[string]any{"filter": "rig"}, daw.Request{Op: "plugins", Filter: "rig"}},
 		{"run_command", map[string]any{"category": "Edit", "name": "Undo"}, daw.Request{Op: "run", Category: "Edit", Name: "Undo"}},
 		{"run_command", map[string]any{"category": "Transport", "name": "Forward Bar", "args": map[string]any{"Bars": "4"}}, daw.Request{Op: "run", Category: "Transport", Name: "Forward Bar", Args: map[string]string{"Bars": "4"}}},
+		{"audio_edit", map[string]any{"edit": "split", "track": "Guitar", "bar": 9}, daw.Request{Op: "audio", Action: "split", Path: "Guitar", Value: "9"}},
 		{"section", map[string]any{"action": "repeat", "section": "Chorus 1", "target": "Bridge"}, daw.Request{Op: "section", Action: "repeat", Section: "Chorus 1", Target: "Bridge"}},
 		{"section", map[string]any{"action": "add", "name": "Verse, Chorus", "bars": 4}, daw.Request{Op: "section", Action: "add", Name: "Verse, Chorus", Bars: 4}},
 	}
@@ -116,7 +117,7 @@ func TestEveryToolHasADescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 14 {
+	if len(tools.Tools) != 15 {
 		t.Errorf("tools = %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {

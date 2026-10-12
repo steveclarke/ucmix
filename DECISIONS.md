@@ -261,3 +261,33 @@ Repeated Chorus after Bridge, at bar 17; the rest moved 8 bars later.
 - Selection is not reported by the remote, so ucdaw cannot check the selection before Duplicate/Delete; it checks the arranger list after and says plainly when it does not match, with the undo command.
 - `command run` gained `--arg name=value` and MCP `run_command` an `args` object, since arguments turned out to be the key to most commands.
 - Blocked by the auto-mode classifier (not retried): `Edit / Select All` + `Edit / Delete` to clear the test arrangement. The blank-arrangement case was reached with Undo instead.
+
+## Step 2: audio events and edits (01:45–02:25 NDT)
+
+- **Audio without a microphone or a file dialog.** Recording would capture Steve's room and Import File risks a native file panel ucdaw cannot cancel, so the test take was made inside Studio Pro: `Track / Add Instrument and Track {mode: 1, cid: <Mojito>, preset: default, openEditor: 0}` (no editor window opened), `Instrument Parts / Insert Instrument Part` (one bar at the cursor, from `Insert Part.js`), `Musical Functions / Fill with Notes {…}` (arguments from the factory macros), `Event / Bounce Selection {Snap: 0}` → a new stereo audio track with the rendered take. Renamed it "Take", duplicated the event to four bars and bounced again into one 4-bar event.
+- **Studio Pro does not send audio events to remotes.** A capture (`state record`) during the bounce shows only the new channel's `PV`/`PS`/`PC` values and the focus change: no `BO` kind, no `ZM` message for events. Event lists are only markers, arranger, chords and lyrics. So audio edits are sent and answered "not read back"; ucdaw says so in every answer rather than claiming a confirmation it does not have.
+- **Selecting a track's events:** `PV mixer/channel/chN/selected 1` selects the track (exclusive), then `Edit / Select All on Tracks` selects its events. Every edit below then acts on that track only (checked on screen: the Mojito track was untouched).
+- **Edits, each checked on screen (window captures of Studio Pro only, kept out of the repo):**
+  - fade out the last bar: `Transport / Locate Selection End`, `Transport / Rewind Bar {Bars: 1}`, `Audio / Fade Out from Cursor`.
+  - fade in: `Transport / Locate Selection`, `Forward Bar {Bars}`, `Audio / Fade In to Cursor`.
+  - split at bar N: `Return to Zero`, `Forward Bar {Bars: N-1}`, `Edit / Split at Cursor`.
+  - trim: same cursor, `Event / Trim End to Cursor` / `Trim Start to Cursor`.
+  - crossfade: `Audio / Create Crossfades` only joins events that overlap (its script checks `left.end > right.start`); a plain split has no overlap, so ucdaw also runs `Audio / Create Autofades {Length: seconds}` (0.25 gave ~0.25 s fades on every edge).
+  - quantize: `Event / Quantize`.
+- "Crossfade the end of the guitar take" reads as a fade-out of the end; the MCP description says so.
+- **Arrangement edits carry the audio.** `section duplicate Verse` copied the Mojito part and the take into the new Verse at bar 9 (checked on screen), then undone.
+- Live run (serve, 02:20 NDT):
+
+```
+$ ucdaw audio fade-out Take            (run earlier as raw commands)
+$ ucdaw audio fade-in Take
+Faded in the first bar of Take. Studio Pro does not report audio events to remotes, so this one is not read back.
+$ ucdaw audio split Take 2
+Split Take at bar 2. Studio Pro does not report audio events to remotes, so this one is not read back.
+$ ucdaw audio trim-end Take 4
+Trimmed the end of Take to bar 4. …
+$ ucdaw audio crossfade Take --ms 50
+Crossfaded the joins in Take, with 50 ms fades on every edit. …
+$ ucdaw audio quantize Take
+Quantized Take to the quantize grid. …
+```
