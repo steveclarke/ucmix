@@ -116,3 +116,30 @@ func TestProblemPrintsHint(t *testing.T) {
 		t.Errorf("printed %q", buf.String())
 	}
 }
+
+func TestCommandArgs(t *testing.T) {
+	got, err := commandArgs([]string{"Name=Chorus", "Number="})
+	if err != nil || got["Name"] != "Chorus" || got["Number"] != "" || len(got) != 2 {
+		t.Fatalf("commandArgs = %v, %v", got, err)
+	}
+	if _, err := commandArgs([]string{"nonsense"}); err == nil {
+		t.Fatal("want an error for an argument without =")
+	}
+	if got, err := commandArgs(nil); got != nil || err != nil {
+		t.Fatalf("no flags = %v, %v", got, err)
+	}
+}
+
+func TestSplitPlacement(t *testing.T) {
+	s, w, tg, err := splitPlacement(strings.Fields("chorus one after the bridge"), "after")
+	if err != nil || s != "chorus one" || w != "after" || tg != "the bridge" {
+		t.Errorf("got %q %q %q %v", s, w, tg, err)
+	}
+	s, w, tg, err = splitPlacement([]string{"Bridge", "before", "Chorus 2"}, "")
+	if err != nil || s != "Bridge" || w != "before" || tg != "Chorus 2" {
+		t.Errorf("got %q %q %q %v", s, w, tg, err)
+	}
+	if _, _, _, err := splitPlacement([]string{"Bridge", "Chorus"}, ""); err == nil {
+		t.Error("missing before/after accepted")
+	}
+}

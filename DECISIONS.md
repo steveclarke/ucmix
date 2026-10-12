@@ -222,3 +222,42 @@ A review agent read the whole branch. Fixed, each with a test where it can be te
 ## Reconnect: skipped on Steve's instruction
 
 - Change from Steve via the coordinator (01:05 NDT): skip step 5 entirely. Studio Pro is not quit, relaunched or restarted tonight, and nothing is done that could disconnect it. Reconnect stays as written in round 1 and is listed in the hand-back note as "to test with Steve".
+
+## Step 1: arrangement edits (01:05–01:40 NDT)
+
+Route 1 (Studio Pro's own commands with `commandArgs`) worked; routes 2–4 (InvokeMethod, macros) were not needed.
+
+- **Where the argument names came from.** The macros in `~/Documents/Studio One/Macros` (Studio Pro's factory macros) carry `CommandArgument` pairs: `Arranger / Goto Section {Number, Name}`, `Transport / Forward Bar {Bars}`, `Marker / Insert Named {Name}`. The binary has `Number,Name,Play` next to Goto Section. Studio Pro's script packages (`Contents/Scripts/*.package`, `PACKAGEF` header then zlib streams) hold the edit tasks in JavaScript: `Rename Events.js` reads `context.parameters.addString ("New Name")`, so `Event / Rename Events {"New Name": …}` renames without a dialog.
+- **Goto Section by Number selects the section.** `Goto Section {Number: n}` (1-based) moves the cursor to section n *and selects it on the arranger track*. `{Name: "Chorus"}` alone also worked; `{Number: "", Name: …}` (as the factory macros write it) did nothing over the remote. ucdaw always selects by number, because names repeat ("Chorus", "Chorus").
+- **What each edit is, proven live against the arranger list (`BO EvDL Arng`):**
+  - duplicate: Goto Section n, `Edit / Duplicate` → the copy goes right after, later sections and markers shift.
+  - repeat X after Y: Goto X, `Edit / Copy`, cursor to Y's end (Goto the next section, or Return to Zero + `Forward Bar {Bars}` when Y is last), `Edit / Paste` → inserted at the cursor, later sections shift.
+  - delete: Goto n, `Arranger / Delete Range` → section gone, gap closed. (`Edit / Delete` removes the section but leaves the gap.)
+  - move: copy + paste at the target, then Delete Range on the original. Two undo steps; the answer says so.
+  - rename: Goto n, `Event / Rename Events {"New Name": name}`. Without arguments it opens the Rename dialog (auto-cancelled); with a wrong argument name it renames to "" (seen live with `Name`, `Text`, `Title`…, each undone).
+  - add: Return to Zero + Forward Bar to the end of the last section, `Edit / Create Range from Cursor`, Forward Bar {bars}, `Edit / Range End to Cursor`, `Arranger / Add Arranger Section from Selection`; Studio Pro auto-names it ("Intro", "Verse"), then ucdaw renames it. Works in a song with no sections at all.
+- Live run (serve, 01:35 NDT):
+
+```
+$ ucdaw section
+1 section: Intro bar 1 (8 bars).
+$ ucdaw section rename Intro Verse
+Renamed Intro to Verse.
+$ ucdaw section add Chorus Bridge
+Added sections Chorus and Bridge, 8 bars each; sections now: Verse bar 1, Chorus bar 9, Bridge bar 17.
+$ ucdaw section repeat Chorus after Bridge
+Repeated Chorus after Bridge, at bar 25.
+$ ucdaw section duplicate Verse
+Duplicated Verse; the copy starts at bar 9 and the rest moved 8 bars later.
+$ ucdaw section move Bridge before "Chorus 1"
+Moved Bridge before Chorus; it now starts at bar 17 (undo takes two steps).
+$ ucdaw section delete "verse two"
+Deleted Verse (bar 9, 8 bars); the rest moved up to close the gap.
+$ ucdaw section repeat chorus two after the bridge
+Repeated Chorus after Bridge, at bar 17; the rest moved 8 bars later.
+```
+
+- Side effects worth knowing: Copy/Paste uses Studio Pro's clipboard. `Delete Range` leaves song markers that sat inside the section at its start instead of deleting them (sections are right; markers are Studio Pro's to keep).
+- Selection is not reported by the remote, so ucdaw cannot check the selection before Duplicate/Delete; it checks the arranger list after and says plainly when it does not match, with the undo command.
+- `command run` gained `--arg name=value` and MCP `run_command` an `args` object, since arguments turned out to be the key to most commands.
+- Blocked by the auto-mode classifier (not retried): `Edit / Select All` + `Edit / Delete` to clear the test arrangement. The blank-arrangement case was reached with Undo instead.

@@ -37,6 +37,8 @@ type fakeStudio struct {
 	snapshot      []proto.Frame
 	// onCommand answers an InvokeCommand with update frames.
 	onCommand map[string][]proto.Frame
+	// onInvoke, when set, answers every InvokeCommand with its arguments.
+	onInvoke func(category, name string, args map[string]string) []proto.Frame
 	// onConfirm answers a ConfirmDialog.
 	onConfirm []proto.Frame
 }
@@ -67,12 +69,18 @@ func (f *fakeStudio) Send(_ context.Context, frame proto.Frame) error {
 			}
 		case "InvokeCommand":
 			var body struct {
-				Category string `json:"commandCategory"`
-				Name     string `json:"commandName"`
+				Category string            `json:"commandCategory"`
+				Name     string            `json:"commandName"`
+				Args     map[string]string `json:"commandArgs"`
 			}
 			_ = json.Unmarshal(msg.Body, &body)
 			for _, out := range f.onCommand[body.Category+"|"+body.Name] {
 				f.frames <- out
+			}
+			if f.onInvoke != nil {
+				for _, out := range f.onInvoke(body.Category, body.Name, body.Args) {
+					f.frames <- out
+				}
 			}
 		}
 	case proto.CodePV:

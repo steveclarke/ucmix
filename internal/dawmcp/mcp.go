@@ -44,8 +44,19 @@ type filterIn struct {
 }
 
 type commandIn struct {
-	Category string `json:"category" jsonschema:"command category exactly as list_commands shows it, e.g. Track"`
-	Name     string `json:"name" jsonschema:"command name exactly as list_commands shows it, e.g. Add Audio Track (mono)"`
+	Category string            `json:"category" jsonschema:"command category exactly as list_commands shows it, e.g. Track"`
+	Name     string            `json:"name" jsonschema:"command name exactly as list_commands shows it, e.g. Add Audio Track (mono)"`
+	Args     map[string]string `json:"args,omitempty" jsonschema:"optional command arguments as a Studio Pro macro carries them, e.g. {\"Bars\": \"4\"} for Transport / Forward Bar; a command that needs arguments and gets none opens a dialog, which ucdaw cancels"`
+}
+
+type sectionIn struct {
+	Action  string  `json:"action" jsonschema:"one of: list, add, duplicate, repeat, move, delete, rename, goto, play"`
+	Section string  `json:"section,omitempty" jsonschema:"the section to act on: its name (Chorus), number (3), or name and occurrence (Chorus 2, second chorus, last chorus)"`
+	Where   string  `json:"where,omitempty" jsonschema:"move only: before or after"`
+	Target  string  `json:"target,omitempty" jsonschema:"repeat and move: the section it goes after (repeat) or before/after (move)"`
+	Name    string  `json:"name,omitempty" jsonschema:"rename: the new name; add: the new sections' names, comma-separated (Verse, Chorus, Bridge)"`
+	Bars    float64 `json:"bars,omitempty" jsonschema:"add: length of each new section in bars (default 8); play: stop after this many bars"`
+	Seconds float64 `json:"seconds,omitempty" jsonschema:"play only: stop after this many seconds"`
 }
 
 type trackIn struct {
@@ -68,7 +79,7 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "studio-pro-ucnet", Title: "Studio Pro (UCNET)", Version: version}, &mcp.ServerOptions{
 		Instructions: "Drives the Fender Studio Pro song that is open on this network, the way the Studio Pro Remote app does. " +
 			"Every change is read back from Studio Pro before the tool answers, and each answer is one line to pass on to the musician as is. " +
-			"Start with get_song to see tracks and tempo. add_track and add_insert build a track with its plug-ins. For anything without its own tool (undo, zoom, editing), " +
+			"Start with get_song to see tracks, tempo and arranger sections. add_track and add_insert build a track with its plug-ins; section edits the arrangement. For anything without its own tool (undo, zoom, editing), " +
 			"find the command with list_commands and run it with run_command; most song changes undo with run_command Edit / Undo.",
 	})
 	call := func(ctx context.Context, req daw.Request, withData bool) (*mcp.CallToolResult, any, error) {
@@ -187,7 +198,19 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			"what changed in the song (\"added Track 1 (audio)\"). View and editing commands give no report back; the answer says so. " +
 			"Commands act on the current selection, like the menu items they are. Undo with category Edit, name Undo.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in commandIn) (*mcp.CallToolResult, any, error) {
-		return call(ctx, daw.Request{Op: "run", Category: in.Category, Name: in.Name}, false)
+		return call(ctx, daw.Request{Op: "run", Category: in.Category, Name: in.Name, Args: in.Args}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "section",
+		Description: "Edit the song's arrangement on Studio Pro's arranger track, like a session engineer: " +
+			"list the sections; add new ones at the end (\"add sections Verse, Chorus, Bridge\"); duplicate one (copy right after itself); " +
+			"repeat one after another (\"repeat chorus one after the bridge\": action repeat, section \"Chorus 1\", target Bridge); " +
+			"move one before or after another; delete one (the gap closes); rename one; put the cursor at one (goto) or play from it. " +
+			"Everything in a section's time moves with it and later sections move along. Each edit is confirmed from Studio Pro's arranger " +
+			"and answered in one line. Undo with run_command Edit / Undo (a move takes two).",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sectionIn) (*mcp.CallToolResult, any, error) {
+		return call(ctx, daw.Request{Op: "section", Action: in.Action, Section: in.Section, Where: in.Where, Target: in.Target, Name: in.Name, Bars: in.Bars, Seconds: in.Seconds}, false)
 	})
 	return s
 }

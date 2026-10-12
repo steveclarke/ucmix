@@ -28,6 +28,11 @@ type Request struct {
 	BPM      float64 `json:"bpm,omitempty"`
 	// Args are command arguments for run, as a Studio Pro macro carries them.
 	Args map[string]string `json:"args,omitempty"`
+	// Section, Target and Where name arranger sections for section edits:
+	// move Section Where (before/after) Target.
+	Section string `json:"section,omitempty"`
+	Target  string `json:"target,omitempty"`
+	Where   string `json:"where,omitempty"`
 }
 
 // Result is what happened, in one line, plus structured detail for --json.
@@ -105,6 +110,8 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return st.insert(ctx, req.Path, req.Name, req.Value)
 	case "plugins":
 		return Plugins(req.Filter)
+	case "section":
+		return st.section(ctx, req)
 	}
 	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
 }

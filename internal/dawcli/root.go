@@ -100,6 +100,7 @@ func newRootCmd() *cobra.Command {
 		newCommandCmd(o),
 		newTrackCmd(o),
 		newInsertCmd(o),
+		newSectionCmd(o),
 		newPluginsCmd(o),
 		newServeCmd(o),
 		newMCPCmd(o),
@@ -437,6 +438,7 @@ func createCapture(path string) (*os.File, error) {
 }
 
 func newCommandCmd(o *options) *cobra.Command {
+	var cmdArgs []string
 	cmd := &cobra.Command{
 		Use:   "command",
 		Short: "List and run Studio Pro's own commands (any menu or key command)",
@@ -464,9 +466,15 @@ func newCommandCmd(o *options) *cobra.Command {
 			if len(args) == 2 {
 				req.Name = args[1]
 			}
+			parsed, err := commandArgs(cmdArgs)
+			if err != nil {
+				return err
+			}
+			req.Args = parsed
 			return run(cmd, o, req)
 		},
 	}
+	runCmd.Flags().StringArrayVar(&cmdArgs, "arg", nil, "command argument as name=value (repeatable), as a Studio Pro macro carries it")
 	cmd.AddCommand(list, runCmd)
 	return cmd
 }
@@ -595,4 +603,20 @@ func printError(w io.Writer, err error) {
 		return
 	}
 	_, _ = fmt.Fprintln(w, "Error:", safe(err.Error()))
+}
+
+// commandArgs parses repeated name=value flags into command arguments.
+func commandArgs(flags []string) (map[string]string, error) {
+	if len(flags) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(flags))
+	for _, f := range flags {
+		name, value, ok := strings.Cut(f, "=")
+		if !ok || strings.TrimSpace(name) == "" {
+			return nil, daw.Problem{Message: fmt.Sprintf("a command argument is name=value, not %q", f)}
+		}
+		out[strings.TrimSpace(name)] = value
+	}
+	return out, nil
 }
