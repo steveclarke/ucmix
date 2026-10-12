@@ -129,3 +129,12 @@ SAY  The tempo is 120 bpm. The click is on, and the song played for two seconds 
 ```
 
   Whole `claude -p` run 26 s wall (model startup and thinking); the Studio Pro calls themselves take 0.04 s each plus the requested 2 s of playback.
+
+## Commands with arguments, and dialogs (23:45 NDT)
+
+- `InvokeCommand` takes `"commandArgs"` as a JSON object of strings. Live: a new mono track, then
+  `{"id": "InvokeCommand","commandCategory": "Track","commandName": "Add Insert to Selected Channels","commandArgs": {"mode": "1","cid": "{D9AE9ACD-69B4-4B43-B8D5-983E39C559A5}","preset": "default"}}`
+  put **Pro EQ** on the track (`PS mixer/channel/ch1/inserts/slot1/deviceName "Pro EQ"`). Argument names come from FenderStudioProMCP's macro notes; class IDs from Studio Pro's own `Arm64/Plugins-en.settings`. Guitar Rig 7 is installed and listed there.
+- `commandArgs` as an array of `{name, value}` is not understood: Studio Pro opened the command's dialog instead. A modal dialog blocks Undo and other commands until it closes.
+- Studio Pro announces dialogs to the remote: `ZM {"id": "BeginDialog","dialogType": 1,"dialogText": "","dialogTitle": "Add Insert to Selected Channels","firstButton": "Cancel","secondButton": "OK"}`, and `JM {"id": "ConfirmDialog","dialogResult": 0}` from the client presses the first button (Cancel), answered by `ZM {"id": "EndDialog"}`. Used live twice to close that dialog on Steve's screen; the test track and insert were then undone (song empty again).
+- Decision: ucdaw tracks open dialogs in the model; a command that opens one is cancelled at once and reported, so nothing is left blocking Studio Pro.
