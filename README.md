@@ -226,6 +226,46 @@ ucmix dump --as-config          # emit the live board as a config file
 in-session read-back returns unparsed values, so verification requires a new
 snapshot.
 
+## ucdaw: Studio Pro over UCNET
+
+`ucdaw` (in `cmd/ucdaw`, not yet released) drives Fender Studio Pro 8 over the
+same UCNET transport, speaking as the Studio Pro Remote app. It reads every
+change back from Studio Pro before it answers, keeps a live model of the song
+from Studio Pro's own updates, and runs any of Studio Pro's own commands.
+
+> **Unofficial.** Not affiliated with or endorsed by Fender or PreSonus.
+> "Studio Pro" and "Studio One" are trademarks of their owners. ucdaw reads
+> Studio Pro's installed `dawremote.xml` and plug-in list at runtime and does
+> not redistribute them.
+
+```console
+$ ucdaw serve &                       # optional: holds one session, ~40 ms answers
+$ ucdaw state
+120 bpm, 4/4, click on, loop off, stopped; no tracks yet.
+$ ucdaw track add mono --name Guitar
+Added mono audio track Guitar.
+$ ucdaw insert Guitar "Guitar Rig 7"
+Added Guitar Rig 7 to Guitar (insert 1).
+$ ucdaw transport play --bars 4
+Played 4 bars at 120 bpm, then stopped.
+$ ucdaw command run "Edit > Undo"
+Ran Edit > Undo: removed Guitar Rig 7 from Guitar.
+```
+
+Commands: `discover`, `state [prefix]`, `state record <file>`,
+`transport play|stop|rtz|loop`, `click`, `tempo`, `track add`, `insert`,
+`plugins`, `param get|set`, `params`, `command list|run`, `serve`, `mcp`.
+Every command takes `--json`.
+
+For Claude Code:
+
+```console
+$ go install ./cmd/ucdaw
+$ claude mcp add --scope user studio-pro-ucnet -- "$(go env GOPATH)/bin/ucdaw" mcp
+```
+
+The agent skill is in `skills/ucdaw/SKILL.md`.
+
 ## Library
 
 ```go
