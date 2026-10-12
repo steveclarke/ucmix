@@ -115,7 +115,7 @@ $ ucdaw command list "zoom full"
 - The model stays current from Studio Pro's own updates: tempo set to 100 and a stereo track added over a separate `--direct` connection both showed up in serve's `tempo` and `state` at once (then undone, tempo back to 120).
 - **Untested live:** reconnect after Studio Pro restarts, because the brief forbids quitting Studio Pro. The code path is the same `Connect` the CLI uses; the background loop retries after `Done`.
 
-## Step 7: MCP (23:40 NDT)
+## Step 7: MCP (23:28 NDT)
 
 - `github.com/modelcontextprotocol/go-sdk` v1.8.0 resolved and works. `ucdaw mcp` serves 10 tools on stdio: `transport`, `click`, `tempo`, `get_song`, `get_values`, `get_param`, `set_param`, `list_params`, `list_commands`, `run_command`. Each call uses serve when it runs, direct otherwise. Problems come back as tool errors with "Next: <what to do>".
 - Registered at user scope: `claude mcp add --scope user studio-pro-ucnet -- /Users/steve/go/bin/ucdaw mcp` (binary from `go install ./cmd/ucdaw`). The existing `studio-pro` entry is untouched.
@@ -130,7 +130,7 @@ SAY  The tempo is 120 bpm. The click is on, and the song played for two seconds 
 
   Whole `claude -p` run 26 s wall (model startup and thinking); the Studio Pro calls themselves take 0.04 s each plus the requested 2 s of playback.
 
-## Commands with arguments, and dialogs (23:45 NDT)
+## Commands with arguments, and dialogs
 
 - `InvokeCommand` takes `"commandArgs"` as a JSON object of strings. Live: a new mono track, then
   `{"id": "InvokeCommand","commandCategory": "Track","commandName": "Add Insert to Selected Channels","commandArgs": {"mode": "1","cid": "{D9AE9ACD-69B4-4B43-B8D5-983E39C559A5}","preset": "default"}}`
@@ -139,7 +139,7 @@ SAY  The tempo is 120 bpm. The click is on, and the song played for two seconds 
 - Studio Pro announces dialogs to the remote: `ZM {"id": "BeginDialog","dialogType": 1,"dialogText": "","dialogTitle": "Add Insert to Selected Channels","firstButton": "Cancel","secondButton": "OK"}`, and `JM {"id": "ConfirmDialog","dialogResult": 0}` from the client presses the first button (Cancel), answered by `ZM {"id": "EndDialog"}`. Used live twice to close that dialog on Steve's screen; the test track and insert were then undone (song empty again).
 - Decision: ucdaw tracks open dialogs in the model; a command that opens one is cancelled at once and reported, so nothing is left blocking Studio Pro.
 
-## Tracks, plug-ins and presets (00:05 NDT)
+## Tracks, plug-ins and presets
 
 - `ucdaw track add [mono|stereo] --name X` runs `Track > Add Audio Track (...)`, waits for the new channel, and renames it with `PS mixer/channel/chN/label` (readback confirmed).
 - `ucdaw insert <channel> <plug-in> [--preset P]` selects the channel (`PV .../selected 1`; live, selection is exclusive: the other track went to 0), then runs `Track > Add Insert to Selected Channels` with `commandArgs {mode: "1", cid: <class ID>, preset: P or "default"}`, waits for `inserts/count` to grow, and reads back the slot's `deviceName` and `surface/focusPresetName`.
@@ -172,7 +172,7 @@ Ran Edit > Undo: removed Guitar.
 
 - Not testable here: Steve's own Guitar Rig "clean" preset. This MacBook has no Studio Pro user presets (`~/Documents/Studio One` holds none). If his clean sound is a Guitar Rig preset saved inside Guitar Rig rather than as a Studio Pro preset, he saves it once from Studio Pro's plug-in window preset menu; then `--preset <name>` loads it.
 
-## Headline flow from a fresh `claude -p` (00:10 NDT)
+## Headline flow from a fresh `claude -p`
 
 Prompt: "give me a guitar track with Guitar Rig on it. Then show me the song. Then undo what you did so the song is empty again, and confirm it is." Transcript in Hugo `personal/projects/talk-to-daw/research/overnight-2026-10-12-mcp-guitar-transcript.jsonl`.
 
@@ -186,3 +186,22 @@ run_command Edit / Undo         -> Ran Edit > Undo: removed Guitar Rig 7 from Gu
 run_command Edit / Undo         -> Ran Edit > Undo: removed Guitar.
 get_song                        -> ... no tracks yet.
 ```
+
+## Markers and arranger sections
+
+- `BO` frames starting `EvDL` are event lists: `"EvDL" [len u32] [version u16 = 1] [kind 4] [u32 0] [count u32]`, then per entry `[tag 4] [u32 0] [colour u32] [start f64] [end f64] [name NUL]`, times in seconds. Kinds: `Mark` (tags `MSta`, `Mark`, `MEnd`), `Arng` (arranger sections), `Chrd`, `Lyrc`.
+- Decoded live: two markers 2 and 4 bars in (`#2` at 4 s, `#3` at 8 s at 120 bpm), then `Arranger > Create Sections from Markers` gave three sections (0–4, 4–8, 8–300 s). Undone afterwards.
+- `ucdaw state` now lists them: `... no tracks yet; sections: Start 0:00, #2 0:12; markers: #2 0:12.` (live, then undone).
+
+## Independent code review
+
+A review agent read the whole branch. Fixed, each with a test where it can be tested without Studio Pro:
+
+- serve dialled Studio Pro while holding its session lock, with no timeout: a Studio Pro that accepted TCP but never answered would hang every request. Now dials outside the lock with a 10 s limit (direct mode 8 s).
+- A cancelled button press could leave the button held: the release is now always sent.
+- A timed play whose start was not confirmed returned without stopping: it now always sends Stop.
+- serve ignored a client hanging up mid timed play: each request now runs under a context cancelled when the client disconnects.
+- A lost session was dropped without closing its sockets: now closed.
+- Change reports matched channels by path, so deleting one channel misreported the renumbered ones: now matched by name and kind.
+- Unchanged values counted as changes; NaN reached Studio Pro; negative play lengths meant endless play; two plug-ins with the same name from different vendors were silently merged; a test race in dawserve. All fixed.
+- Not changed: writes in the shared `internal/transport` have no deadline (mixer code path, left alone). Studio Pro selection is exclusive (checked live), so inserting never hits other channels.

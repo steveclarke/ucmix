@@ -118,14 +118,26 @@ func Find(all []Plugin, name string) (Plugin, error) {
 		case 1:
 			return set[0], nil
 		}
-		if len(set) == len(exact) {
+		if len(set) == len(exact) && sameVendor(set) {
 			return set[0], nil // same plug-in in several formats: Studio Pro's first
 		}
 		names := make([]string, len(set))
 		for i, p := range set {
 			names[i] = p.Name
+			if p.Vendor != "" {
+				names[i] += " (" + p.Vendor + ")"
+			}
 		}
 		return Plugin{}, fmt.Errorf("%q matches %s; say which", name, strings.Join(names, ", "))
 	}
 	return Plugin{}, fmt.Errorf("no plug-in called %q is installed", name)
+}
+
+func sameVendor(set []Plugin) bool {
+	for _, p := range set[1:] {
+		if p.Vendor != set[0].Vendor {
+			return false
+		}
+	}
+	return true
 }

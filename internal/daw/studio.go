@@ -196,6 +196,12 @@ func (st *Studio) transport(ctx context.Context, req Request) (Result, error) {
 }
 
 func (st *Studio) play(ctx context.Context, req Request) (Result, error) {
+	if req.Seconds < 0 || req.Bars < 0 || math.IsNaN(req.Seconds) || math.IsNaN(req.Bars) {
+		return Result{}, Problem{Message: "a play length must be a positive number of seconds or bars"}
+	}
+	if req.Bars > 0 && st.Tempo() <= 0 {
+		return Result{}, Problem{Message: "Studio Pro has not reported the tempo, so bars cannot be timed", Hint: "give a length in seconds instead"}
+	}
 	duration := time.Duration(req.Seconds * float64(time.Second))
 	what := ""
 	if req.Bars > 0 {
@@ -212,6 +218,12 @@ func (st *Studio) play(ctx context.Context, req Request) (Result, error) {
 	}
 	if !st.playing() {
 		if err := st.press(ctx, "transport/start", NumIs("transport/start", 1)); err != nil {
+			if duration > 0 {
+				// Playback may have started anyway; a timed play must end stopped.
+				stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+				_ = st.stop(stopCtx)
+				cancel()
+			}
 			return Result{}, st.unconfirmed(err, "Play")
 		}
 	}
@@ -737,33 +749,35 @@ func (st *Studio) settle(ctx context.Context, seq uint64) {
 
 func (st *Studio) summarize(before []Channel, changes []string) string {
 	after := st.channels()
-	key := func(c Channel) string { return c.Path + "|" + c.Name + "|" + c.Kind }
-	was := map[string]bool{}
-	for _, c := range before {
-		was[key(c)] = true
+	// Channels are matched by name and kind, not path: removing one channel
+	// renumbers the ones after it.
+	key := func(c Channel) string { return c.Name + "|" + c.Kind }
+	keys := func(cs []Channel) []string {
+		out := make([]string, len(cs))
+		for i, c := range cs {
+			out[i] = key(c)
+		}
+		return out
 	}
-	now := map[string]bool{}
+	addedCh, removedCh := diffLists(keys(before), keys(after))
 	var parts []string
-	for _, c := range after {
-		now[key(c)] = true
-		if !was[key(c)] {
-			parts = append(parts, fmt.Sprintf("added %s (%s)", c.Name, kindWord(c.Kind)))
-		}
+	for _, k := range addedCh {
+		name, kind, _ := strings.Cut(k, "|")
+		parts = append(parts, fmt.Sprintf("added %s (%s)", name, kindWord(kind)))
 	}
-	for _, c := range before {
-		if !now[key(c)] {
-			parts = append(parts, fmt.Sprintf("removed %s", c.Name))
-		}
+	for _, k := range removedCh {
+		name, _, _ := strings.Cut(k, "|")
+		parts = append(parts, fmt.Sprintf("removed %s", name))
 	}
 	if len(parts) > 0 {
 		return strings.Join(parts, ", ")
 	}
 	inserts := map[string][]string{}
 	for _, c := range before {
-		inserts[c.Path] = c.Inserts
+		inserts[key(c)] = c.Inserts
 	}
 	for _, c := range after {
-		added, removed := diffLists(inserts[c.Path], c.Inserts)
+		added, removed := diffLists(inserts[key(c)], c.Inserts)
 		for _, a := range added {
 			parts = append(parts, fmt.Sprintf("added %s to %s", a, c.Name))
 		}

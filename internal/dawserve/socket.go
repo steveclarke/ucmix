@@ -75,8 +75,8 @@ func clearStaleSocket(path string) error {
 	return os.Remove(path)
 }
 
-// checkPeer refuses a connection whose other end runs as another user.
-func checkPeer(conn net.Conn) error {
+// checkPeer refuses a connection whose other end is not user want.
+func checkPeer(conn net.Conn, want int) error {
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
 		return errors.New("dawserve: not a Unix socket")
@@ -85,7 +85,7 @@ func checkPeer(conn net.Conn) error {
 	if err != nil {
 		return fmt.Errorf("dawserve: reading peer credentials: %w", err)
 	}
-	if uid != currentUID() {
+	if uid != want {
 		return fmt.Errorf("dawserve: socket peer is user %d, not you", uid)
 	}
 	return nil

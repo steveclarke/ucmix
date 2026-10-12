@@ -187,7 +187,7 @@ func (m *Model) full(path string) bool {
 }
 
 func (m *Model) setNum(path string, v float64, record func(string)) {
-	if m.full(path) {
+	if old, ok := m.nums[path]; (ok && old == v) || m.full(path) {
 		return
 	}
 	m.nums[path] = v
@@ -195,7 +195,7 @@ func (m *Model) setNum(path string, v float64, record func(string)) {
 }
 
 func (m *Model) setStr(path, v string, record func(string)) {
-	if m.full(path) {
+	if old, ok := m.strs[path]; (ok && old == v) || m.full(path) {
 		return
 	}
 	m.strs[path] = v

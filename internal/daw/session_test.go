@@ -30,6 +30,8 @@ type fakeStudio struct {
 	echoStrings bool
 	// loopRange is whether the song has a loop range (Studio Pro refuses loop without one).
 	loopRange bool
+	// ignoreStart drops Play presses unanswered.
+	ignoreStart bool
 	// stubbornStops is how many Stop presses to answer without stopping.
 	stubbornStops int
 	snapshot      []proto.Frame
@@ -96,6 +98,9 @@ func (f *fakeStudio) SendBatch(ctx context.Context, frames []proto.Frame) error 
 		key, _, _ := proto.UnmarshalPV(frame.Payload)
 		switch key {
 		case "transport/start":
+			if f.ignoreStart {
+				continue
+			}
 			f.frames <- pv("transport/start", 1)
 			f.frames <- pv("transport/stop", 0)
 		case "transport/stop":

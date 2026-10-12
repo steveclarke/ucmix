@@ -327,15 +327,17 @@ func (s *Session) Press(ctx context.Context, path string, wire float64) error {
 	}); err != nil {
 		return fmt.Errorf("daw: pressing %s: %w", path, err)
 	}
-	if err := sleepFor(ctx, gestureHold); err != nil {
-		return err
-	}
-	if err := s.t.Send(ctx, proto.Frame{
+	holdErr := sleepFor(ctx, gestureHold)
+	// The release goes out even if the caller gave up mid-hold: a button
+	// left pressed in Studio Pro is worse than a late answer.
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	if err := s.t.Send(releaseCtx, proto.Frame{
 		Code: proto.CodePE, ConnID: id, Payload: proto.MarshalPE(path, 0),
 	}); err != nil {
 		return fmt.Errorf("daw: releasing %s: %w", path, err)
 	}
-	return nil
+	return holdErr
 }
 
 // Invoke runs a Studio Pro command by category and name, exactly as the

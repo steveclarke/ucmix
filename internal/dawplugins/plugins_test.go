@@ -64,3 +64,14 @@ func TestFind(t *testing.T) {
 		}
 	}
 }
+
+func TestFindRefusesSameNameFromDifferentVendors(t *testing.T) {
+	all := []Plugin{{Name: "Comp", Vendor: "A", ClassID: "1"}, {Name: "Comp", Vendor: "B", ClassID: "2"}}
+	if _, err := Find(all, "comp"); err == nil || !strings.Contains(err.Error(), "(B)") {
+		t.Errorf("err = %v", err)
+	}
+	same := []Plugin{{Name: "Comp", Vendor: "A", Format: "VST3"}, {Name: "Comp", Vendor: "A", Format: "AU"}}
+	if p, err := Find(same, "comp"); err != nil || p.Format != "VST3" {
+		t.Errorf("same vendor = %+v, %v", p, err)
+	}
+}

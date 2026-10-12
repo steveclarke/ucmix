@@ -77,7 +77,7 @@ func (p Param) ToWire(value float64) (float64, error) {
 	if !p.Numeric() {
 		return 0, fmt.Errorf("%s is %s, not a number", p.Path, p.Type)
 	}
-	if value < p.Min-1e-9 || value > p.Max+1e-9 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < p.Min-1e-9 || value > p.Max+1e-9 {
 		return 0, fmt.Errorf(
 			"%s must be between %s and %s", p.Path,
 			trimFloat(p.Min), trimFloat(p.Max),

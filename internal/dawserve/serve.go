@@ -42,10 +42,12 @@ type Server struct {
 	Connect Connector
 	Log     func(format string, args ...any)
 
-	mu      sync.Mutex // guards session and since
+	mu      sync.Mutex // guards session and since; never held while dialing
 	session *daw.Session
 	since   time.Time
+	dialing sync.Mutex // one connection attempt at a time
 	work    sync.Mutex // serializes requests that change the song
+	uid     int        // the user serve runs as; only this user may connect
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -54,24 +56,50 @@ func (s *Server) logf(format string, args ...any) {
 	}
 }
 
-// current returns a live session, connecting if there is none.
-func (s *Server) current(ctx context.Context) (*daw.Session, error) {
+// live returns the held session if it is still connected, closing and
+// dropping a lost one.
+func (s *Server) live() *daw.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.session != nil {
-		select {
-		case <-s.session.Done():
-			s.logf("Studio Pro connection lost")
-			s.session = nil
-		default:
-			return s.session, nil
-		}
+	if s.session == nil {
+		return nil
 	}
-	session, err := s.Connect(ctx)
+	select {
+	case <-s.session.Done():
+		s.logf("Studio Pro connection lost")
+		_ = s.session.Close()
+		s.session = nil
+		return nil
+	default:
+		return s.session
+	}
+}
+
+// connectTimeout bounds one connection attempt, so a Studio Pro that accepts
+// TCP but never answers cannot hang serve.
+const connectTimeout = 10 * time.Second
+
+// current returns a live session, connecting if there is none. The session
+// lock is not held while dialing, so status and other readers never wait on
+// the network.
+func (s *Server) current(ctx context.Context) (*daw.Session, error) {
+	if session := s.live(); session != nil {
+		return session, nil
+	}
+	s.dialing.Lock()
+	defer s.dialing.Unlock()
+	if session := s.live(); session != nil {
+		return session, nil // another caller connected while this one waited
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	session, err := s.Connect(dialCtx)
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
 	s.session, s.since = session, time.Now()
+	s.mu.Unlock()
 	e := session.Endpoint()
 	s.logf("connected to Studio Pro on %s (%s)", e.Name, e.IP)
 	return session, nil
@@ -158,6 +186,7 @@ func (s *Server) Serve(ctx context.Context, socketPath string) error {
 		return fmt.Errorf("dawserve: listening on %s: %w", socketPath, err)
 	}
 	_ = os.Chmod(socketPath, 0o600)
+	s.uid = currentUID()
 	defer func() { _ = os.Remove(socketPath) }()
 	go func() {
 		<-ctx.Done()
@@ -189,31 +218,40 @@ func (s *Server) closeSession() {
 // maxRequest caps one request line.
 const maxRequest = 64 << 10
 
+// handle answers one request per connection. The request runs under a
+// context cancelled when the client hangs up, so a client that gives up
+// (Ctrl-C during a timed play) ends the play, which then stops.
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	if err := checkPeer(conn); err != nil {
+	if err := checkPeer(conn, s.uid); err != nil {
 		s.logf("refused a connection: %v", err)
 		return
 	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 4096), maxRequest)
 	encoder := json.NewEncoder(conn)
-	for scanner.Scan() {
+	if scanner.Scan() {
 		var in wireRequest
 		var out wireResponse
 		if err := json.Unmarshal(scanner.Bytes(), &in); err != nil {
 			out.Error = &wireError{Message: "bad request: " + err.Error()}
 		} else {
-			result, err := s.Do(ctx, in.Request)
+			reqCtx, cancel := context.WithCancel(ctx)
+			go func() {
+				// The client sends nothing more; a read returning means it hung up.
+				var b [1]byte
+				_, _ = conn.Read(b[:])
+				cancel()
+			}()
+			result, err := s.Do(reqCtx, in.Request)
+			cancel()
 			if err != nil {
 				out.Error = toWireError(err)
 			} else {
 				out.Result = &result
 			}
 		}
-		if err := encoder.Encode(out); err != nil {
-			return
-		}
+		_ = encoder.Encode(out)
 	}
 }
 
@@ -241,7 +279,7 @@ func (c Client) Available() bool {
 		return false
 	}
 	defer func() { _ = conn.Close() }()
-	return checkPeer(conn) == nil
+	return checkPeer(conn, currentUID()) == nil
 }
 
 // Do implements daw.Engine over the socket.
@@ -252,7 +290,7 @@ func (c Client) Do(ctx context.Context, req daw.Request) (daw.Result, error) {
 		return daw.Result{}, fmt.Errorf("dawserve: connecting to serve: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
-	if err := checkPeer(conn); err != nil {
+	if err := checkPeer(conn, currentUID()); err != nil {
 		return daw.Result{}, err
 	}
 	if deadline, ok := ctx.Deadline(); ok {

@@ -46,7 +46,9 @@ func Connect(ctx context.Context, cacheFile, host string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s, err := dialSession(ctx, endpoint)
+	dialCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	s, err := dialSession(dialCtx, endpoint)
+	cancel()
 	if err != nil {
 		return nil, Problem{
 			Message: fmt.Sprintf("Found Studio Pro on %s but could not connect: %v", endpoint.Name, err),
