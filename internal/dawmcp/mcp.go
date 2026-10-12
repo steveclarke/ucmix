@@ -31,6 +31,11 @@ type tempoIn struct {
 	BPM float64 `json:"bpm,omitempty" jsonschema:"new tempo in beats per minute (10 to 400); leave empty to read the tempo"`
 }
 
+type newSongIn struct {
+	Tempo float64 `json:"tempo,omitempty" jsonschema:"optional tempo for the new song in bpm (10 to 400); leave empty to keep the new song's own"`
+	Click string  `json:"click,omitempty" jsonschema:"optional: on or off; leave empty to keep the new song's own"`
+}
+
 type pathIn struct {
 	Path string `json:"path" jsonschema:"parameter path, e.g. transport/tempo or mixer/channel/ch2/volume"`
 }
@@ -159,6 +164,15 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 		Description: "Read the song tempo, or set it in bpm. Returns one line such as \"Tempo 96 bpm (was 120).\"",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in tempoIn) (*mcp.CallToolResult, any, error) {
 		return call(ctx, daw.Request{Op: "tempo", BPM: in.BPM}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "new_song",
+		Description: "Start a new, empty song in Studio Pro (File > New with its New window's current settings), optionally at a tempo and with the click on or off, " +
+			"and read it back. The song that was open stays open in its own tab; nothing is saved or closed. Only when the musician asks for a new song. " +
+			"Returns one line such as \"Started a new song (2026-10-12 Stephen Clarke) at 72 bpm, click on.\"",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in newSongIn) (*mcp.CallToolResult, any, error) {
+		return call(ctx, daw.Request{Op: "new_song", BPM: in.Tempo, Click: in.Click}, false)
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

@@ -49,6 +49,8 @@ func TestCommandsBuildRequests(t *testing.T) {
 		{[]string{"click"}, daw.Request{Op: "click", Action: "status"}},
 		{[]string{"tempo", "96"}, daw.Request{Op: "tempo", BPM: 96}},
 		{[]string{"tempo"}, daw.Request{Op: "tempo"}},
+		{[]string{"song", "new"}, daw.Request{Op: "new_song"}},
+		{[]string{"song", "new", "--tempo", "72", "--click", "on"}, daw.Request{Op: "new_song", BPM: 72, Click: "on"}},
 		{[]string{"param", "get", "transport/tempo"}, daw.Request{Op: "get", Path: "transport/tempo"}},
 		{[]string{"param", "set", "mixer/channel/ch1/label", "Lead", "Vox"}, daw.Request{Op: "set", Path: "mixer/channel/ch1/label", Value: "Lead Vox"}},
 		{[]string{"state"}, daw.Request{Op: "song"}},
@@ -101,6 +103,15 @@ func TestListRowsPrint(t *testing.T) {
 	}
 	if !strings.Contains(out, "  Edit  Undo\n") || !strings.Contains(out, "Zoom  Undo Zoom") {
 		t.Errorf("out = %q", out)
+	}
+}
+
+func TestSongNewRejectsBadFlags(t *testing.T) {
+	for _, args := range [][]string{{"song", "new", "--click", "loud"}, {"song", "new", "--tempo", "-5"}} {
+		engine := &fakeEngine{}
+		if _, err := execute(t, engine, args...); err == nil || len(engine.got) != 0 {
+			t.Errorf("%v: err = %v, sent %v", args, err, engine.got)
+		}
 	}
 }
 

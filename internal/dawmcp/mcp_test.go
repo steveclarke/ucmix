@@ -55,6 +55,8 @@ func TestToolsMapToRequests(t *testing.T) {
 		{"click", map[string]any{"state": "on"}, daw.Request{Op: "click", Action: "on"}},
 		{"click", map[string]any{}, daw.Request{Op: "click", Action: "status"}},
 		{"tempo", map[string]any{"bpm": 96}, daw.Request{Op: "tempo", BPM: 96}},
+		{"new_song", map[string]any{}, daw.Request{Op: "new_song"}},
+		{"new_song", map[string]any{"tempo": 72, "click": "on"}, daw.Request{Op: "new_song", BPM: 72, Click: "on"}},
 		{"get_song", map[string]any{}, daw.Request{Op: "song"}},
 		{"get_values", map[string]any{"prefix": "transport"}, daw.Request{Op: "dump", Filter: "transport"}},
 		{"get_param", map[string]any{"path": "transport/tempo"}, daw.Request{Op: "get", Path: "transport/tempo"}},
@@ -124,7 +126,7 @@ func TestEveryToolHasADescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 20 {
+	if len(tools.Tools) != 21 {
 		t.Errorf("tools = %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {

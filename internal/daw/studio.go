@@ -26,6 +26,8 @@ type Request struct {
 	Seconds  float64 `json:"seconds,omitempty"`
 	Bars     float64 `json:"bars,omitempty"`
 	BPM      float64 `json:"bpm,omitempty"`
+	// Click is on or off for new_song; empty keeps the new song's own.
+	Click string `json:"click,omitempty"`
 	// Args are command arguments for run, as a Studio Pro macro carries them.
 	Args map[string]string `json:"args,omitempty"`
 	// Section, Target and Where name arranger sections for section edits:
@@ -141,6 +143,8 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return st.fader(ctx, req)
 	case "import":
 		return st.importAudio(ctx, req)
+	case "new_song":
+		return st.newSong(ctx, req)
 	}
 	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
 }
@@ -770,9 +774,13 @@ func (st *Studio) run(ctx context.Context, category, name string, args map[strin
 				Hint:    "close it in Studio Pro",
 			}
 		}
+		hint := "pass the command's arguments, or use a command that needs no dialog"
+		if strings.EqualFold(cmd.Category, "File") && strings.EqualFold(cmd.Name, "New Session") {
+			hint = newSongHint
+		}
 		return Result{}, Problem{
 			Message: fmt.Sprintf("%s opened the %q dialog, which needs choices ucdaw cannot make; canceled it.", full, d.Title),
-			Hint:    "pass the command's arguments, or use a command that needs no dialog",
+			Hint:    hint,
 		}
 	}
 	changes := st.model().ChangesSince(seq)
