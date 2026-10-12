@@ -130,3 +130,28 @@ func TestModelStopsGrowingAtMaxPaths(t *testing.T) {
 		t.Error("existing paths must still update at the cap")
 	}
 }
+
+// Button slots stay positional: dialogResult 1 is the second button even when
+// the first has no label.
+func TestDialogButtonsKeepTheirSlots(t *testing.T) {
+	tests := []struct {
+		first, second string
+		want          []string
+	}{
+		{"OK", "Cancel", []string{"OK", "Cancel"}},
+		{"", "Cancel", []string{"", "Cancel"}},
+		{"OK", "", []string{"OK"}},
+		{"", "", nil},
+	}
+	for _, tt := range tests {
+		m := NewModel()
+		body := fmt.Sprintf(`{"id": "BeginDialog","dialogTitle": "T","firstButton": %q,"secondButton": %q}`, tt.first, tt.second)
+		if err := m.ApplyFrame(zm(t, body)); err != nil {
+			t.Fatal(err)
+		}
+		d, _ := m.Dialog()
+		if fmt.Sprint(d.Buttons) != fmt.Sprint(tt.want) || len(d.Buttons) != len(tt.want) {
+			t.Errorf("%q/%q: buttons = %q, want %q", tt.first, tt.second, d.Buttons, tt.want)
+		}
+	}
+}

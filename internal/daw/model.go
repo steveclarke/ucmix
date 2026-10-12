@@ -314,11 +314,15 @@ func (m *Model) ApplyJSON(body []byte) error {
 	}
 	switch head.ID {
 	case "BeginDialog":
+		// Buttons stay in their slots, an unlabeled one as "", because
+		// ConfirmDialog answers by slot. Only trailing empty slots go.
 		d := &Dialog{Title: head.DialogTitle, Text: head.DialogText}
-		for _, b := range []string{head.FirstButton, head.SecondButton} {
-			if b != "" {
-				d.Buttons = append(d.Buttons, b)
-			}
+		d.Buttons = []string{head.FirstButton, head.SecondButton}
+		for len(d.Buttons) > 0 && d.Buttons[len(d.Buttons)-1] == "" {
+			d.Buttons = d.Buttons[:len(d.Buttons)-1]
+		}
+		if len(d.Buttons) == 0 {
+			d.Buttons = nil
 		}
 		m.mutate(func(r func(string)) {
 			m.dialog = d
