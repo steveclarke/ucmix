@@ -348,19 +348,22 @@ func (s *Session) Invoke(ctx context.Context, category, name string, args map[st
 	return s.sendJM(ctx, invokeCommandBody(category, name, args))
 }
 
-// DismissDialog presses the open dialog's Cancel button and waits for Studio
-// Pro to close it. The button is found by its label: the Add Insert dialog
-// lists Cancel first, the New window lists it second, and pressing the first
-// button there would start a new song. A dialog with no Cancel button gets
-// its first button.
-func (s *Session) DismissDialog(ctx context.Context) error {
-	button := 0
-	if d, open := s.model.Dialog(); open {
-		if i := buttonIndex(d, "cancel"); i >= 0 {
-			button = i
-		}
+// DismissDialog closes the open dialog without choosing for the musician and
+// returns the label of the button it pressed. It presses only a button that
+// means "don't do it" (Cancel, No, Don't…, Do Not…), found by label because
+// button order differs between dialogs, or the only button of a one-button
+// alert. When there is no such button it presses nothing and returns a
+// Problem naming the dialog and its buttons, so the musician answers it.
+func (s *Session) DismissDialog(ctx context.Context) (string, error) {
+	d, open := s.model.Dialog()
+	if !open {
+		return "", nil
 	}
-	return s.AnswerDialog(ctx, button)
+	button, ok := declineButton(d)
+	if !ok {
+		return "", leftOpen(d)
+	}
+	return d.Buttons[button], s.AnswerDialog(ctx, button)
 }
 
 // AnswerDialog presses one of the open dialog's buttons (0 is the first, as

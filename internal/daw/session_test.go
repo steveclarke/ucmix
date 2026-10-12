@@ -371,7 +371,7 @@ func TestDialogTrackedAndDismissed(t *testing.T) {
 		t.Errorf("dialog = %+v", d)
 	}
 	fake.onConfirm = []proto.Frame{zm(t, `{"id": "EndDialog"}`)}
-	if err := s.DismissDialog(context.Background()); err != nil {
+	if _, err := s.DismissDialog(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if jm := fake.sentJM(); jm[len(jm)-1] != `{"id": "ConfirmDialog","dialogResult": 0}` {

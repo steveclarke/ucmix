@@ -220,6 +220,11 @@ func TestImportAcceptsAConversionAndCancelsAnythingElse(t *testing.T) {
 		wantJM               string
 	}{
 		{"Convert Audio Files", "Cancel", "Convert", false, `{"id": "ConfirmDialog","dialogResult": 1}`},
+		{"Convert Audio Files", "Don't Convert", "Convert", false, `{"id": "ConfirmDialog","dialogResult": 1}`},
+		{"Convert Audio Files", "Convert", "Don’t Convert", false, `{"id": "ConfirmDialog","dialogResult": 0}`},
+		{"Convert Audio Files", "Import Without Converting", "Convert", false, `{"id": "ConfirmDialog","dialogResult": 1}`},
+		{"Convert Audio Files", "Do Not Convert", "Convert", false, `{"id": "ConfirmDialog","dialogResult": 1}`},
+		{"Convert Audio Files", "No", "Convert", false, `{"id": "ConfirmDialog","dialogResult": 1}`},
 		{"Unknown Format", "OK", "", true, `{"id": "ConfirmDialog","dialogResult": 0}`},
 	} {
 		r := newImportRig(t)
@@ -240,7 +245,7 @@ func TestImportAcceptsAConversionAndCancelsAnythingElse(t *testing.T) {
 		if !c.wantErr && !strings.Contains(res.Message, `Studio Pro answered "Convert Audio Files" with Convert.`) {
 			t.Errorf("%s: message = %q", c.title, res.Message)
 		}
-		if c.wantErr && !strings.Contains(err.Error(), "ucdaw canceled it") {
+		if c.wantErr && !strings.Contains(err.Error(), `ucdaw closed it with "OK"`) {
 			t.Errorf("%s: err = %v", c.title, err)
 		}
 		var confirms []string

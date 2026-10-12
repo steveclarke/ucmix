@@ -289,21 +289,18 @@ func (st *Studio) answerImportDialog(ctx context.Context, d Dialog) (string, err
 	// converting. A one-button alert is never one.
 	conversion := false
 	for _, w := range []string{"convert", "sample rate", "samplerate", "resample"} {
-		if strings.Contains(text, w) && len(d.Buttons) == 2 {
+		if strings.Contains(text, w) && len(labeled(d)) == 2 {
 			conversion = true
 		}
 	}
+	// The first button that says yes to converting, never one that turns it
+	// down: "Don't Convert" holds "convert" too.
 	button := -1
 	if conversion {
 		for i, b := range d.Buttons {
-			l := strings.ToLower(b)
-			if strings.Contains(l, "cancel") || strings.Contains(l, "no") && !strings.Contains(l, "now") {
-				continue
-			}
-			for _, w := range []string{"convert", "ok", "yes", "import", "apply", "continue"} {
-				if strings.Contains(l, w) {
-					button = i
-				}
+			if !negativeLabel(b) && hasWord(b, "convert", "ok", "yes", "import", "apply", "continue") {
+				button = i
+				break
 			}
 		}
 	}
@@ -313,10 +310,7 @@ func (st *Studio) answerImportDialog(ctx context.Context, d Dialog) (string, err
 		}
 		return fmt.Sprintf("answered %q with %s", d.Title, d.Buttons[button]), nil
 	}
-	if err := st.session.DismissDialog(ctx); err != nil {
-		return "", Problem{Message: fmt.Sprintf("Studio Pro opened the %q dialog and ucdaw could not close it", d.Title), Hint: "close it in Studio Pro"}
-	}
-	return "", Problem{Message: fmt.Sprintf("Studio Pro asked %q while importing; ucdaw canceled it", strings.TrimSpace(d.Title+" "+d.Text))}
+	return "", st.dismiss(ctx, d, fmt.Sprintf("Studio Pro asked %q while importing", strings.TrimSpace(d.Title+" "+d.Text)), "")
 }
 
 // landingTimeout allows for big files: 15 s plus a second per 20 MB of

@@ -115,8 +115,7 @@ func (st *Studio) addInstrument(ctx context.Context, req Request) (Result, error
 	})
 	cancel()
 	if d, open := st.model().Dialog(); open {
-		_ = st.session.DismissDialog(ctx)
-		return Result{}, Problem{Message: fmt.Sprintf("Studio Pro asked for choices (%q) instead of adding %s; canceled it.", d.Title, p.Name)}
+		return Result{}, st.dismiss(ctx, d, fmt.Sprintf("Studio Pro opened the %q dialog instead of adding %s", d.Title, p.Name), "")
 	}
 	if err != nil {
 		return Result{}, st.unconfirmed(ErrUnconfirmed, "Adding "+p.Name)

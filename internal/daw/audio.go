@@ -116,8 +116,7 @@ func (st *Studio) audio(ctx context.Context, req Request) (Result, error) {
 	}
 	st.settle(ctx, seq)
 	if d, open := st.model().Dialog(); open {
-		_ = st.session.DismissDialog(ctx)
-		return Result{}, Problem{Message: fmt.Sprintf("Studio Pro asked for choices (%q); canceled it.", d.Title)}
+		return Result{}, st.dismiss(ctx, d, fmt.Sprintf("Studio Pro opened the %q dialog during the edit", d.Title), "")
 	}
 	return Result{Message: msg + notReadBack, Data: map[string]any{"channel": ch.Path, "commands": stepNames(steps)}}, nil
 }

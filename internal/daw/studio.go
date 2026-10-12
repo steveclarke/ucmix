@@ -790,21 +790,13 @@ func (st *Studio) run(ctx context.Context, category, name string, args map[strin
 	full := joinCommand(cmd.Category, cmd.Name)
 	if d, open := st.model().Dialog(); open {
 		// A command that needs choices opens its dialog; leaving it would
-		// block Studio Pro, so ucdaw cancels it and says so.
-		if err := st.session.DismissDialog(ctx); err != nil {
-			return Result{}, Problem{
-				Message: fmt.Sprintf("%s opened the %q dialog and ucdaw could not close it.", full, d.Title),
-				Hint:    "close it in Studio Pro",
-			}
-		}
+		// block Studio Pro, so ucdaw cancels it if a button just cancels,
+		// and says what it did.
 		hint := "pass the command's arguments, or use a command that needs no dialog"
 		if strings.EqualFold(cmd.Category, "File") && strings.EqualFold(cmd.Name, "New Session") {
 			hint = newSongHint
 		}
-		return Result{}, Problem{
-			Message: fmt.Sprintf("%s opened the %q dialog, which needs choices ucdaw cannot make; canceled it.", full, d.Title),
-			Hint:    hint,
-		}
+		return Result{}, st.dismiss(ctx, d, fmt.Sprintf("%s opened the %q dialog, which needs choices ucdaw cannot make", full, d.Title), hint)
 	}
 	changes := st.model().ChangesSince(seq)
 	effect := st.summarize(beforeChannels, changes)

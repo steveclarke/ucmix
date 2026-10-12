@@ -54,16 +54,9 @@ func (st *Studio) newSong(ctx context.Context, req Request) (Result, error) {
 	}
 	ok := buttonIndex(d, "ok")
 	if !strings.EqualFold(strings.TrimSpace(d.Title), "New") || ok < 0 {
-		if err := st.session.DismissDialog(ctx); err != nil {
-			return Result{}, Problem{
-				Message: fmt.Sprintf("File > New Session opened the %q dialog and ucdaw could not close it.", d.Title),
-				Hint:    "close it in Studio Pro",
-			}
-		}
-		return Result{}, Problem{
-			Message: fmt.Sprintf("Studio Pro opened the %q dialog instead of its New window; ucdaw canceled it, so no new song was started.", strings.TrimSpace(d.Title+" "+d.Text)),
-			Hint:    "check Studio Pro, then try again",
-		}
+		return Result{}, st.dismiss(ctx, d,
+			fmt.Sprintf("Studio Pro opened the %q dialog instead of its New window, so no new song was started", strings.TrimSpace(d.Title+" "+d.Text)),
+			"check Studio Pro, then try again")
 	}
 	seq := st.model().Seq()
 	// AnswerDialog confirms the window closed within two seconds; a new song

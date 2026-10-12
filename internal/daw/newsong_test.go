@@ -102,7 +102,7 @@ func TestNewSongCancelsAnotherDialog(t *testing.T) {
 	fake.mu.Unlock()
 	_, err := st.Do(context.Background(), Request{Op: "new_song"})
 	var p Problem
-	if !errors.As(err, &p) || !strings.Contains(p.Message, `"Save Changes"`) || !strings.Contains(p.Message, "canceled") {
+	if !errors.As(err, &p) || !strings.Contains(p.Message, `"Save Changes"`) || !strings.Contains(p.Message, `closed it with "Cancel"`) {
 		t.Errorf("err = %v", err)
 	}
 	if got := lastConfirm(fake); got != `{"id": "ConfirmDialog","dialogResult": 1}` {
@@ -179,7 +179,7 @@ func TestDismissDialogPressesCancelByLabel(t *testing.T) {
 	fake.onConfirm = []proto.Frame{zm(t, `{"id": "EndDialog"}`)}
 	fake.mu.Unlock()
 	_ = s.WaitFor(context.Background(), func(m *Model) bool { _, open := m.Dialog(); return open })
-	if err := s.DismissDialog(context.Background()); err != nil {
+	if _, err := s.DismissDialog(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := lastConfirm(fake); got != `{"id": "ConfirmDialog","dialogResult": 1}` {
