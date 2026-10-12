@@ -254,19 +254,24 @@ $ ucdaw fader Pad --down 3
 Pad at -3 dB (was 0 dB).
 $ ucdaw fader Pad 0
 Pad at 0 dB (was -3 dB).
+$ ucdaw import ~/Music/stems
+Imported 4 stems onto new tracks at bar 1: Kick (mono), Bass DI (stereo), Pad (stereo) and Lead Vox (mono). Skipped notes.txt (not audio). Tracks read back; Studio Pro does not report clips to remotes, so placement is not read back (Studio Pro drew each file's waveform, so it read every file).
 ```
 
 Commands: `discover`, `state [prefix]`, `state record <file>`,
 `transport play|stop|rtz|loop`, `click`, `tempo`, `track add`, `insert`,
 `instrument add`, `section list|add|duplicate|repeat|move|delete|rename|goto|play`,
 `audio fade-out|fade-in|split|trim-start|trim-end|crossfade|quantize`,
-`fader`, `favorite set|list|remove`, `plugins`, `presets`, `param get|set`,
+`fader`, `import <file|folder>... [--onto track] [--at bar]`, `favorite set|list|remove`, `plugins`, `presets`, `param get|set`,
 `params`, `command list|run [--arg name=value]`, `serve`, `mcp`.
 Every command takes `--json`.
 
 Faders read and take dB on Studio Pro's own fader curve (measured against its
 console). Audio edits are sent but not read back: Studio Pro does not report
-audio events to remote apps. Favorites (`favorite set "clean guitar" "Guitar Rig 7"
+audio events to remote apps. `import` puts each WAV or AIFF stem on its own new
+mono or stereo track at bar 1, named from the file ("01_Kick_Final.wav" is Kick),
+one file at a time; it hands files to Studio Pro with `open`, so it works only with
+Studio Pro on the same Mac. Favorites (`favorite set "clean guitar" "Guitar Rig 7"
 --preset Clean`) are kept in the user config folder, readable only by the user.
 
 For Claude Code:

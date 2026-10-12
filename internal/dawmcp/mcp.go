@@ -64,6 +64,12 @@ type audioIn struct {
 	Seconds float64 `json:"seconds,omitempty" jsonschema:"crossfade: fade length in seconds (default 0.01)"`
 }
 
+type importIn struct {
+	Paths []string `json:"paths" jsonschema:"full paths of WAV or AIFF files, or of a folder of stems (~ works); a folder imports its audio files in name order"`
+	Onto  string   `json:"onto,omitempty" jsonschema:"optional existing audio track to place the files on (they overlap there); leave empty for one new track per file"`
+	Bar   int      `json:"bar,omitempty" jsonschema:"bar to place the clips at (default 1, the song start)"`
+}
+
 type sectionIn struct {
 	Action  string  `json:"action" jsonschema:"one of: list, add, duplicate, repeat, move, delete, rename, goto, play"`
 	Section string  `json:"section,omitempty" jsonschema:"the section to act on: its name (Chorus), number (3), or name and occurrence (Chorus 2, second chorus, last chorus)"`
@@ -209,6 +215,21 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			"Returns one line such as \"Added mono audio track Guitar.\" Undo with run_command Edit / Undo.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in trackIn) (*mcp.CallToolResult, any, error) {
 		return call(ctx, daw.Request{Op: "add_track", Action: in.Format, Name: in.Name, Plugin: in.Plugin, Preset: in.Preset}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "import_audio",
+		Description: "Import audio files (WAV, AIFF) or a folder of stems into the open song: each file gets its own new mono or stereo track " +
+			"to match it, named for a musician (01_Kick_Final.wav becomes Kick), with the clip at bar 1, so the stems line up ready to mix. " +
+			"Files go in one at a time; other files in a folder are skipped and named. Studio Pro does not report clips to remotes: " +
+			"the answer confirms the tracks and says clip placement was not read back, so pass that on. Only for Studio Pro on this Mac. " +
+			"Undo takes two run_command Edit / Undo steps per stem (the clip, then the track).",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in importIn) (*mcp.CallToolResult, any, error) {
+		paths, err := daw.ImportPaths(in.Paths)
+		if err != nil {
+			return failure(err), nil, nil
+		}
+		return call(ctx, daw.Request{Op: "import", Files: paths, Onto: in.Onto, At: in.Bar}, false)
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

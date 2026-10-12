@@ -59,6 +59,8 @@ func TestCommandsBuildRequests(t *testing.T) {
 		{[]string{"track", "add", "stereo"}, daw.Request{Op: "add_track", Action: "stereo"}},
 		{[]string{"insert", "Guitar", "Guitar Rig 7", "--preset", "Clean"}, daw.Request{Op: "insert", Path: "Guitar", Name: "Guitar Rig 7", Value: "Clean"}},
 		{[]string{"command", "run", "Edit > Undo"}, daw.Request{Op: "run", Category: "Edit > Undo"}},
+		{[]string{"import", "/stems"}, daw.Request{Op: "import", Files: []string{"/stems"}, At: 1}},
+		{[]string{"import", "/a.wav", "/b/../b.aif", "--onto", "Vox", "--at", "17"}, daw.Request{Op: "import", Files: []string{"/a.wav", "/b.aif"}, Onto: "Vox", At: 17}},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {

@@ -378,3 +378,53 @@ SAY  Everything is set up except the clean guitar sound. Guitar Rig 7 is on the 
 - `section play "Chorus 1" --for 1` live: "From Chorus: Played 1 s at 72 bpm, then stopped." Plain "Chorus" with two choruses answers "The song has 2 "Chorus" sections. say which: Chorus 1 (bar 9) or Chorus 2 (bar 25)".
 - Files Studio Pro wrote because of the tests: `Bounces/Track 1.wav` and `Bounces/Take.wav` (plus a peak cache file) in the throwaway song's folder, from the two `Event / Bounce Selection` runs; listed in the Hugo round 2 note. Studio Pro's own autosaves (`History/`) also continued as usual.
 - `just test`: 739 tests pass; `golangci-lint`: 0 issues on the ucdaw packages.
+
+# Importing stems (2026-10-12, from 08:50 NDT)
+
+## What carries the import
+
+- `Session / Import File` ignores arguments and opens the macOS file panel (proven earlier today); not used.
+- `open -a "Studio Pro 8" <file>` imports onto the selected track at the playhead (proven earlier today). ucdaw runs it as `exec.Command("open", "-g", "-a", "/Applications/Studio Pro 8.app", <absolute cleaned path>)`: no shell, and the path is absolute, so it can never read as a flag. Live: with `-g` Chrome stayed the front app through an import (`lsappinfo front` before and after), so Studio Pro does not jump in front of Steve on every stem.
+- Recipe per stem: `Track / Add Audio Track (mono|stereo)` to match the file (read from its WAV or AIFF header), rename it, confirm `selected` (`PV .../selected 1`, read back), `Transport / Return to Zero` (+ `Forward Bar {Bars}` for `--at`), `open`, wait for the landing signal.
+
+## The landing signal
+
+- **UCNET carries nothing for an import.** Three captures (`ucdaw state record`) around imports: after the new track's values, the only frames were `ZM {"id": "BeginProgress"}` / `ZM {"id": "EndProgress"}`. The third capture ran Return to Zero, waited 3 s, then imported: the pair arrived right after Return to Zero, two seconds before the import, and nothing came with the import itself. The pair belongs to Return to Zero.
+
+```
+cap3 (ms since subscribe): 4227 ZM BeginProgress / 4227 ZM EndProgress   <- rtz at ~4.0 s
+                           (open -a at ~7.1 s: no frame)                  12811 PS document/title (periodic)
+```
+
+- **The song's waveform cache is the signal.** Studio Pro writes `<song>/Cache/Images/<hash><file name><frames in upper-case hex>.peak` when it reads a new file: `x270F117B01_Kick_Final.wav2EE00.peak` (0x2EE00 = 192000 frames = 4 s at 48 kHz), `x270F117B03-Pad (Stereo) v2.wav56220.peak` (352800 = 8 s at 44.1 kHz: frames at the file's own rate). The hash changes with the folder. ucdaw finds the song folder from `document/title` (`~/Documents/Studio One/Songs/<title>/`, checked for `<title>.song` or `.song.autosave`) and watches for a new file ending in `<name><frames hex>.peak`.
+- A file the song has already read keeps its old waveform file (re-importing the Pad: mtime unchanged), yet it did import (the undo sequence proved both clips). So when the waveform file already exists, or the song folder is not found, ucdaw waits a fixed 2 s instead and the answer says the waveform was drawn for only some files.
+- Measured: the waveform file appeared 0.2–0.45 s after `open` for 0.7–1.2 MB stems. Window captures every ~300 ms showed the clip on its track in the frame after the waveform file's mtime. ucdaw waits 0.3 s more after the waveform before the next track is added. The wait for a waveform is 15 s plus 1 s per 20 MB of audio, at most 3 minutes; a stem that never lands stops the batch with what was done so far.
+
+## Clip names
+
+- A clip is named after its file ("02 Bass DI"). `Event / Rename Events {"New Name": "Bass DI"}` renamed it (checked on screen). Sent 0.3 s after the waveform appeared, the rename was ignored twice (both AIFF files; screenshots every 300 ms showed the clip in place but never renamed); the same commands sent a few seconds later worked. So ucdaw renames all clips at the end of a batch, 1.5 s after the last import, each after `Edit / Select All on Tracks` on its own new track, so the rename cannot touch anything else. With `--onto` clips keep their file names.
+- Undo, counted live: three steps per stem (clip name, clip, track). `Ran Edit > Undo: removed Lead Vox.` comes on every third press.
+
+## Formats and dialogs
+
+- The song is 44.1 kHz (`UpdateTimeContext` `sampleRate: 44100`). 48 kHz WAV, 44.1 kHz WAV and 48 kHz 24-bit AIFF all imported with no dialog; Studio Pro writes a sample-rate cache under `Cache/Audio` a moment later. So the dialog path is **untested live**: no conversion question appeared. ucdaw accepts a two-button dialog whose title or text mentions converting or the sample rate (presses the button labelled Convert/OK/Yes/Import, never Cancel) and cancels anything else, reporting it. `Session.AnswerDialog(ctx, 0|1)` sends `{"id": "ConfirmDialog","dialogResult": n}`; `DismissDialog` is now `AnswerDialog(ctx, 0)`.
+- Headers: WAV (RIFF, RF64 via `ds64`, BWF with `bext` before `fmt `, `WAVE_FORMAT_EXTENSIBLE`) and AIFF/AIFC (`COMM`, 80-bit sample rate). At most 256 chunk headers and 4 KB of a format chunk are read; audio data is never read; fuzzed (`FuzzParseAudioHeader`, 380k runs, no panic). MP3, FLAC, M4A, OGG, CAF are skipped with "convert it first". More than two channels is skipped. At most 64 files per import.
+- Names: leading track numbers (1–2 digits, or more with a leading zero: "808 Sub" keeps its 808), version tags (v2), bit depths, sample rates, tempos, dates and the words final, stem, bounce, print, master, stereo, mono… are dropped; brackets are opened, not deleted ("Snare (Mic 2)" → "Snare Mic 2"); a hyphen between letters stays ("Hi-Hat"); a prefix every file shares is dropped ("Amazing Grace_Kick" → "Kick"); repeats get 2, 3. Control characters are stripped.
+- Same Mac only: `open` acts on this Mac, so ucdaw refuses when Studio Pro's address is not one of this Mac's.
+- The CLI resolves paths (and `~`) before the request crosses to serve, whose working folder differs. The CLI gives an import 30 minutes instead of the usual 90 s.
+
+## Live test
+
+Stems generated with ffmpeg under `~/Music/ucdaw-test/stems/`: `01_Kick_Final.wav` (mono 48 kHz 16-bit, 4.5 s), `02 Bass DI.wav` (stereo 48 kHz, 6.5 s), `03-Pad (Stereo) v2.wav` (stereo 44.1 kHz, 8.5 s), `04_Lead_Vox_24bit.aif` (mono 48 kHz 24-bit AIFF, 5.5 s), plus `notes.txt`. Through serve:
+
+```
+$ ucdaw import ~/Music/ucdaw-test/stems            (2.6 s wall)
+Imported 4 stems onto new tracks at bar 1: Kick (mono), Bass DI (stereo), Pad (stereo) and Lead Vox (mono). Skipped notes.txt (not audio). Tracks read back; Studio Pro does not report clips to remotes, so placement is not read back (Studio Pro drew each file's waveform, so it read every file).
+$ ucdaw state
+… 11 channels: …, Kick (audio, mono), Bass DI (audio, stereo), Pad (audio, stereo), Lead Vox (audio, mono); …
+```
+
+- Window capture after the run: four tracks Kick, Bass DI, Pad, Lead Vox, each clip starting on the bar-1 line and named like its track. Left in the song for Steve.
+- My mistake during the run: a stray second `ucdaw import … &` in the same shell line was not stopped by `kill %1` and imported the four stems again onto four more tracks. Undone with 12 Undo presses (three per stem, as above), channel count read back 15 → 11.
+- Kick's clip on screen is 4 s long though the regenerated file is 4.5 s. The stems were regenerated in place (same names) after the development imports of the 4 s versions; Studio Pro seems to keep a file's length from earlier in the session. Real stems are not rewritten under the same name mid-session; noted, not chased.
+- `just test`: 764 tests pass; `golangci-lint`: 0 issues on the ucdaw packages.

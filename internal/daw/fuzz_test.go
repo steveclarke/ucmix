@@ -63,3 +63,16 @@ func TestTruncatedWireInputIsAnErrorNotAPanic(t *testing.T) {
 		}
 	}
 }
+
+// Audio file headers come from whatever folder the musician points at.
+func FuzzParseAudioHeader(f *testing.F) {
+	f.Add(wavBytes(2, 48000, 24, 10, true))
+	f.Add(aiffBytes(1, 44100, 16, 10))
+	f.Add([]byte("RIFF\xff\xff\xff\xffWAVEfmt \xff\xff\xff\xff"))
+	f.Add([]byte("RF64\xff\xff\xff\xffWAVEds64\x10\x00\x00\x00"))
+	f.Add([]byte("FORM\x00\x00\x00\x04AIFF"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = parseAudioHeader(bytes.NewReader(data), int64(len(data)))
+		_ = cleanStemName(string(data))
+	})
+}

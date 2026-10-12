@@ -102,6 +102,7 @@ func newRootCmd() *cobra.Command {
 		newInsertCmd(o),
 		newSectionCmd(o),
 		newAudioCmd(o),
+		newImportCmd(o),
 		newFaderCmd(o),
 		newInstrumentCmd(o),
 		newFavoriteCmd(o),
@@ -119,7 +120,11 @@ func run(cmd *cobra.Command, o *options, req daw.Request) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(cmd.Context(), daw.MaxPlay+30*time.Second)
+	timeout := daw.MaxPlay + 30*time.Second
+	if req.Op == "import" {
+		timeout = importTimeout
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 	res, err := engine.Do(ctx, req)
 	if err != nil {

@@ -351,7 +351,16 @@ func (s *Session) Invoke(ctx context.Context, category, name string, args map[st
 // DismissDialog presses the open dialog's first button (Cancel in every
 // dialog seen so far) and waits for Studio Pro to close it.
 func (s *Session) DismissDialog(ctx context.Context) error {
-	if err := s.sendJM(ctx, []byte(`{"id": "ConfirmDialog","dialogResult": 0}`)); err != nil {
+	return s.AnswerDialog(ctx, 0)
+}
+
+// AnswerDialog presses one of the open dialog's buttons (0 is the first, as
+// BeginDialog lists them) and waits for Studio Pro to close the dialog.
+func (s *Session) AnswerDialog(ctx context.Context, button int) error {
+	if button < 0 || button > 1 {
+		return fmt.Errorf("daw: dialog button %d out of range", button)
+	}
+	if err := s.sendJM(ctx, []byte(fmt.Sprintf(`{"id": "ConfirmDialog","dialogResult": %d}`, button))); err != nil {
 		return err
 	}
 	return s.confirm(ctx, func(m *Model) bool {

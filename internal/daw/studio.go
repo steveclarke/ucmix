@@ -37,6 +37,12 @@ type Request struct {
 	// add_instrument, and for favorite set.
 	Plugin string `json:"plugin,omitempty"`
 	Preset string `json:"preset,omitempty"`
+	// Files, Onto and At are for import: absolute paths of audio files or
+	// folders, an existing track to place them on, and the bar to place
+	// them at (0 or 1 is the song start).
+	Files []string `json:"files,omitempty"`
+	Onto  string   `json:"onto,omitempty"`
+	At    int      `json:"at,omitempty"`
 }
 
 // Result is what happened, in one line, plus structured detail for --json.
@@ -133,6 +139,8 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return st.audio(ctx, req)
 	case "fader":
 		return st.fader(ctx, req)
+	case "import":
+		return st.importAudio(ctx, req)
 	}
 	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
 }

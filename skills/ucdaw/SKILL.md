@@ -1,6 +1,6 @@
 ---
 name: ucdaw
-description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to play, stop, loop, set the click or tempo, add an audio or instrument track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, edit the arrangement (add, repeat, move, delete, rename sections), edit audio (fade, split, trim, crossfade, quantize), set a fader in dB, remember a favorite sound, rename/mute/solo a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
+description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to play, stop, loop, set the click or tempo, import audio files or a folder of stems (assemble a mix from stems), add an audio or instrument track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, edit the arrangement (add, repeat, move, delete, rename sections), edit audio (fade, split, trim, crossfade, quantize), set a fader in dB, remember a favorite sound, rename/mute/solo a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
 ---
 
 # ucdaw — Studio Pro over UCNET
@@ -78,6 +78,31 @@ ucdaw audio quantize Guitar
 They act on every event of the track. Studio Pro does not report audio events
 to remote apps, so these are sent but not read back, and the answer says so.
 
+## Importing stems
+
+```bash
+ucdaw import ~/Music/stems                 # every WAV/AIFF in the folder, in name order
+ucdaw import Kick.wav Snare.wav            # files
+ucdaw import Vox.wav --onto Vox --at 17    # onto an existing track, at bar 17
+```
+
+Each file gets its own new track, mono or stereo to match the file, named for a
+musician ("01_Kick_Final.wav" → Kick, "03-Pad (Stereo) v2.wav" → Pad; a prefix
+every file shares, like the song name, is dropped), with its clip at bar 1 and
+the clip renamed to match. Files go in one at a time; other files in the folder
+are skipped and named in the answer.
+
+What is read back: each track (created, named, selected, mono or stereo). What is
+not: the clip's position, because Studio Pro does not report clips to remotes.
+ucdaw knows Studio Pro read each file from the waveform it draws into the song's
+`Cache/Images` folder; a file the song has seen before gets a two-second wait
+instead. Pass the "not read back" part on to the musician.
+
+- Studio Pro must be on this Mac: ucdaw hands it each file with `open`.
+- Undo is three `Edit > Undo` steps per stem (clip name, clip, track).
+- A conversion question from Studio Pro is accepted (the musician wants the
+  stems in); any other dialog is cancelled and reported.
+
 ## Favorites
 
 ```bash
@@ -129,7 +154,7 @@ dB for faders, sends and cue mixes, list entries by name.
 ## MCP tools (`studio-pro-ucnet`)
 
 `get_song`, `transport`, `click`, `tempo`, `add_track`, `add_insert`,
-`add_instrument`, `section`, `audio_edit`, `fader`, `favorite`,
+`add_instrument`, `import_audio`, `section`, `audio_edit`, `fader`, `favorite`,
 `list_plugins`, `list_presets`, `get_values`, `get_param`, `set_param`,
 `list_params`, `list_commands`, `run_command` (with `args`). Start with
 `get_song`. Undo is `run_command` Edit / Undo.
