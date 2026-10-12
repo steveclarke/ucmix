@@ -19,20 +19,24 @@ import (
 // fakeStudio is an in-memory Studio Pro: it answers the handshake and echoes
 // PV writes the way the real one does.
 type fakeStudio struct {
-	mu       sync.Mutex
-	sent     []proto.Frame
-	batches  [][]proto.Frame
-	frames   chan proto.Frame
-	closed   bool
-	echo     bool
-	loop     bool
+	mu      sync.Mutex
+	sent    []proto.Frame
+	batches [][]proto.Frame
+	frames  chan proto.Frame
+	closed  bool
+	echo    bool
+	loop    bool
+	// echoStrings echoes PS writes.
+	echoStrings bool
 	// loopRange is whether the song has a loop range (Studio Pro refuses loop without one).
 	loopRange bool
 	// stubbornStops is how many Stop presses to answer without stopping.
 	stubbornStops int
-	snapshot []proto.Frame
+	snapshot      []proto.Frame
 	// onCommand answers an InvokeCommand with update frames.
 	onCommand map[string][]proto.Frame
+	// onConfirm answers a ConfirmDialog.
+	onConfirm []proto.Frame
 }
 
 func (f *fakeStudio) Send(_ context.Context, frame proto.Frame) error {
@@ -55,6 +59,10 @@ func (f *fakeStudio) Send(_ context.Context, frame proto.Frame) error {
 				f.frames <- s
 			}
 			f.frames <- jmFrame(`{"id": "SubscriptionReply"}`)
+		case "ConfirmDialog":
+			for _, out := range f.onConfirm {
+				f.frames <- out
+			}
 		case "InvokeCommand":
 			var body struct {
 				Category string `json:"commandCategory"`
@@ -67,6 +75,10 @@ func (f *fakeStudio) Send(_ context.Context, frame proto.Frame) error {
 		}
 	case proto.CodePV:
 		if f.echo {
+			f.frames <- frame
+		}
+	case proto.CodePS:
+		if f.echoStrings {
 			f.frames <- frame
 		}
 	}
@@ -235,7 +247,7 @@ func TestSetNumReportsUnconfirmed(t *testing.T) {
 func TestInvokeSendsRemoteAppBody(t *testing.T) {
 	fake := newFake(t)
 	s := dialFake(t, fake)
-	if err := s.Invoke(context.Background(), "Track", "Add Audio Track (mono) & more"); err != nil {
+	if err := s.Invoke(context.Background(), "Track", "Add Audio Track (mono) & more", nil); err != nil {
 		t.Fatal(err)
 	}
 	jm := fake.sentJM()
@@ -316,5 +328,40 @@ func TestChunksReassembleWithinCap(t *testing.T) {
 	blob, err := c.add(proto.CKChunk{Offset: 2, Total: 4, Size: 2, Data: []byte{3, 4}})
 	if err != nil || !bytes.Equal(blob, []byte{1, 2, 3, 4}) {
 		t.Errorf("blob = %v, %v", blob, err)
+	}
+}
+
+func TestInvokeSendsCommandArgsAsObject(t *testing.T) {
+	fake := newFake(t)
+	s := dialFake(t, fake)
+	args := map[string]string{"mode": "1", "cid": "{X}", "preset": "default"}
+	if err := s.Invoke(context.Background(), "Track", "Add Insert to Selected Channels", args); err != nil {
+		t.Fatal(err)
+	}
+	jm := fake.sentJM()
+	want := `{"id": "InvokeCommand","commandCategory": "Track","commandName": "Add Insert to Selected Channels",` +
+		`"commandArgs": {"cid": "{X}","mode": "1","preset": "default"}}`
+	if jm[len(jm)-1] != want {
+		t.Errorf("body = %s", jm[len(jm)-1])
+	}
+}
+
+func TestDialogTrackedAndDismissed(t *testing.T) {
+	fake := newFake(t)
+	s := dialFake(t, fake)
+	fake.mu.Lock()
+	fake.frames <- zm(t, `{"id": "BeginDialog","dialogType": 1,"dialogText": "","dialogTitle": "Add Insert to Selected Channels","firstButton": "Cancel","secondButton": "OK"}`)
+	fake.mu.Unlock()
+	_ = s.WaitFor(context.Background(), func(m *Model) bool { _, open := m.Dialog(); return open })
+	d, _ := s.Model().Dialog()
+	if d.Title != "Add Insert to Selected Channels" || len(d.Buttons) != 2 {
+		t.Errorf("dialog = %+v", d)
+	}
+	fake.onConfirm = []proto.Frame{zm(t, `{"id": "EndDialog"}`)}
+	if err := s.DismissDialog(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if jm := fake.sentJM(); jm[len(jm)-1] != `{"id": "ConfirmDialog","dialogResult": 0}` {
+		t.Errorf("sent %s", jm[len(jm)-1])
 	}
 }

@@ -110,6 +110,8 @@ func (s *Server) Do(ctx context.Context, req daw.Request) (daw.Result, error) {
 		return daw.Params(s.Schema, req.Filter), nil
 	case "status":
 		return s.status(), nil
+	case "plugins":
+		return daw.Plugins(req.Filter)
 	}
 	session, err := s.current(ctx)
 	if err != nil {

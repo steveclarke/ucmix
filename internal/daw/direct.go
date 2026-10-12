@@ -102,8 +102,11 @@ type Direct struct {
 
 // Do implements Engine.
 func (d Direct) Do(ctx context.Context, req Request) (Result, error) {
-	if req.Op == "params" {
+	switch req.Op {
+	case "params":
 		return Params(d.Schema, req.Filter), nil
+	case "plugins":
+		return Plugins(req.Filter)
 	}
 	s, err := Connect(ctx, d.CacheFile, d.Host)
 	if err != nil {

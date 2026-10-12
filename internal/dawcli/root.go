@@ -98,6 +98,9 @@ func newRootCmd() *cobra.Command {
 		newParamsCmd(o),
 		newStateCmd(o),
 		newCommandCmd(o),
+		newTrackCmd(o),
+		newInsertCmd(o),
+		newPluginsCmd(o),
 		newServeCmd(o),
 		newMCPCmd(o),
 	)
@@ -146,6 +149,8 @@ func printRows(w io.Writer, data any) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	for _, row := range rows {
 		switch {
+		case row["classId"] != nil:
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", cell(row["name"]), cell(row["vendor"]), cell(row["format"]))
 		case row["category"] != nil:
 			fmt.Fprintf(tw, "  %s\t%s\n", cell(row["category"]), cell(row["name"]))
 		case row["pattern"] != nil:
@@ -464,6 +469,68 @@ func newCommandCmd(o *options) *cobra.Command {
 	}
 	cmd.AddCommand(list, runCmd)
 	return cmd
+}
+
+func newTrackCmd(o *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "track",
+		Short: "Add tracks",
+	}
+	var name string
+	add := &cobra.Command{
+		Use:       "add [mono|stereo]",
+		Short:     "Add an audio track (mono unless you say stereo), optionally named",
+		Example:   "  ucdaw track add mono --name Guitar",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"mono", "stereo"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := daw.Request{Op: "add_track", Name: name}
+			if len(args) == 1 {
+				req.Action = args[0]
+			}
+			return run(cmd, o, req)
+		},
+	}
+	add.Flags().StringVar(&name, "name", "", "name for the new track")
+	cmd.AddCommand(add)
+	return cmd
+}
+
+func newInsertCmd(o *options) *cobra.Command {
+	var preset string
+	cmd := &cobra.Command{
+		Use:   "insert <channel> <plug-in>",
+		Short: "Put a plug-in on a channel's inserts, optionally with one of its presets",
+		Long: "Adds the plug-in after the channel's existing inserts. <channel> is a track name,\n" +
+			"a number, or a path; <plug-in> is a name from `ucdaw plugins`. --preset loads one of\n" +
+			"the plug-in's Studio Pro presets by name (a subfolder goes first: Misc/50 Hz Removal).",
+		Example: "  ucdaw insert Guitar \"Guitar Rig 7\" --preset Clean",
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(cmd, o, daw.Request{Op: "insert", Path: args[0], Name: args[1], Value: preset})
+		},
+	}
+	cmd.Flags().StringVar(&preset, "preset", "", "Studio Pro preset for the plug-in")
+	return cmd
+}
+
+func newPluginsCmd(o *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "plugins [filter]",
+		Short: "List the effects and instruments Studio Pro has scanned on this Mac",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			filter := ""
+			if len(args) == 1 {
+				filter = args[0]
+			}
+			res, err := daw.Plugins(filter)
+			if err != nil {
+				return err
+			}
+			return printResult(cmd.OutOrStdout(), o, res)
+		},
+	}
 }
 
 func newServeCmd(o *options) *cobra.Command {

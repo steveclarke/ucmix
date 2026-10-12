@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -337,10 +339,23 @@ func (s *Session) Press(ctx context.Context, path string, wire float64) error {
 }
 
 // Invoke runs a Studio Pro command by category and name, exactly as the
-// Remote app's Commands page does. Studio Pro sends no reply; the effect shows
-// up as model changes.
-func (s *Session) Invoke(ctx context.Context, category, name string) error {
-	return s.sendJM(ctx, invokeCommandBody(category, name))
+// Remote app's Commands page does, with optional command arguments (the same
+// name/value pairs a Studio Pro macro file carries). Studio Pro sends no
+// reply; the effect shows up as model changes.
+func (s *Session) Invoke(ctx context.Context, category, name string, args map[string]string) error {
+	return s.sendJM(ctx, invokeCommandBody(category, name, args))
+}
+
+// DismissDialog presses the open dialog's first button (Cancel in every
+// dialog seen so far) and waits for Studio Pro to close it.
+func (s *Session) DismissDialog(ctx context.Context) error {
+	if err := s.sendJM(ctx, []byte(`{"id": "ConfirmDialog","dialogResult": 0}`)); err != nil {
+		return err
+	}
+	return s.confirm(ctx, func(m *Model) bool {
+		_, open := m.Dialog()
+		return !open
+	})
 }
 
 // Close ends the session.
@@ -352,11 +367,24 @@ func (s *Session) Close() error {
 	return s.closeErr
 }
 
-func invokeCommandBody(category, name string) []byte {
-	return []byte(fmt.Sprintf(
-		`{"id": "InvokeCommand","commandCategory": %s,"commandName": %s}`,
+func invokeCommandBody(category, name string, args map[string]string) []byte {
+	body := fmt.Sprintf(
+		`{"id": "InvokeCommand","commandCategory": %s,"commandName": %s`,
 		jsonString(category), jsonString(name),
-	))
+	)
+	if len(args) > 0 {
+		keys := make([]string, 0, len(args))
+		for k := range args {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = jsonString(k) + ": " + jsonString(args[k])
+		}
+		body += `,"commandArgs": {` + strings.Join(parts, ",") + "}"
+	}
+	return []byte(body + "}")
 }
 
 // jsonString quotes s without HTML escaping, so "&" and "<" reach Studio Pro

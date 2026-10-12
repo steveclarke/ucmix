@@ -26,6 +26,8 @@ type Request struct {
 	Seconds  float64 `json:"seconds,omitempty"`
 	Bars     float64 `json:"bars,omitempty"`
 	BPM      float64 `json:"bpm,omitempty"`
+	// Args are command arguments for run, as a Studio Pro macro carries them.
+	Args map[string]string `json:"args,omitempty"`
 }
 
 // Result is what happened, in one line, plus structured detail for --json.
@@ -79,11 +81,17 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 	case "commands":
 		return st.commands(req.Filter), nil
 	case "run":
-		return st.run(ctx, req.Category, req.Name)
+		return st.run(ctx, req.Category, req.Name, req.Args)
 	case "params":
 		return Params(st.schema, req.Filter), nil
 	case "dump":
 		return st.dump(req.Filter), nil
+	case "add_track":
+		return st.addTrack(ctx, req.Action, req.Name)
+	case "insert":
+		return st.insert(ctx, req.Path, req.Name, req.Value)
+	case "plugins":
+		return Plugins(req.Filter)
 	}
 	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
 }
@@ -335,6 +343,7 @@ func (st *Studio) set(ctx context.Context, path, value string) (Result, error) {
 		return Result{}, Problem{Message: fmt.Sprintf("%s is read-only; Studio Pro reports it but does not take changes", p.Path)}
 	}
 	before, _ := st.describe(p)
+	oldName, _ := st.model().Str(p.Path)
 	if p.Type == dawschema.String {
 		if err := st.session.SetStr(ctx, p.Path, value); err != nil {
 			return Result{}, st.unconfirmed(err, "Change to "+p.Path)
@@ -349,8 +358,12 @@ func (st *Studio) set(ctx context.Context, path, value string) (Result, error) {
 		}
 	}
 	after, v := st.describe(p)
+	msg := fmt.Sprintf("%s (was %s).", after, valuePart(before))
+	if strings.HasPrefix(p.Path, "mixer/") && strings.HasSuffix(p.Path, "/label") {
+		msg = fmt.Sprintf("Renamed %s to %s.", oldName, value)
+	}
 	return Result{
-		Message: fmt.Sprintf("%s (was %s).", after, valuePart(before)),
+		Message: msg,
 		Data:    map[string]any{"path": p.Path, "value": v},
 	}, nil
 }
@@ -568,20 +581,37 @@ func (st *Studio) commands(filter string) Result {
 // update Studio Pro sends.
 var commandSettle = 400 * time.Millisecond
 
-func (st *Studio) run(ctx context.Context, category, name string) (Result, error) {
+func (st *Studio) run(ctx context.Context, category, name string, args map[string]string) (Result, error) {
 	cmd, err := FindCommand(st.model().Commands(), category, name)
 	if err != nil {
 		return Result{}, err
 	}
+	if d, open := st.model().Dialog(); open {
+		return Result{}, dialogProblem(d)
+	}
 	beforeChannels := st.channels()
 	seq := st.model().Seq()
-	if err := st.session.Invoke(ctx, cmd.Category, cmd.Name); err != nil {
+	if err := st.session.Invoke(ctx, cmd.Category, cmd.Name, args); err != nil {
 		return Result{}, err
 	}
 	st.settle(ctx, seq)
+	full := joinCommand(cmd.Category, cmd.Name)
+	if d, open := st.model().Dialog(); open {
+		// A command that needs choices opens its dialog; leaving it would
+		// block Studio Pro, so ucdaw cancels it and says so.
+		if err := st.session.DismissDialog(ctx); err != nil {
+			return Result{}, Problem{
+				Message: fmt.Sprintf("%s opened the %q dialog and ucdaw could not close it.", full, d.Title),
+				Hint:    "close it in Studio Pro",
+			}
+		}
+		return Result{}, Problem{
+			Message: fmt.Sprintf("%s opened the %q dialog, which needs choices ucdaw cannot make; cancelled it.", full, d.Title),
+			Hint:    "pass the command's arguments, or use a command that needs no dialog",
+		}
+	}
 	changes := st.model().ChangesSince(seq)
 	effect := st.summarize(beforeChannels, changes)
-	full := joinCommand(cmd.Category, cmd.Name)
 	data := map[string]any{"command": cmd, "changed": changes}
 	if effect == "" {
 		return Result{
@@ -645,6 +675,22 @@ func (st *Studio) summarize(before []Channel, changes []string) string {
 	if len(parts) > 0 {
 		return strings.Join(parts, ", ")
 	}
+	inserts := map[string][]string{}
+	for _, c := range before {
+		inserts[c.Path] = c.Inserts
+	}
+	for _, c := range after {
+		added, removed := diffLists(inserts[c.Path], c.Inserts)
+		for _, a := range added {
+			parts = append(parts, fmt.Sprintf("added %s to %s", a, c.Name))
+		}
+		for _, r := range removed {
+			parts = append(parts, fmt.Sprintf("removed %s from %s", r, c.Name))
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
 	var described []string
 	for _, path := range changes {
 		if strings.HasPrefix(path, "@") || strings.HasPrefix(path, "recorddiskspace/") ||
@@ -656,7 +702,7 @@ func (st *Studio) summarize(before []Channel, changes []string) string {
 			continue
 		}
 		d, _ := st.describe(p)
-		described = append(described, d)
+		described = append(described, strings.Replace(d, ": ", " now ", 1))
 	}
 	sort.Strings(described)
 	if len(described) > 4 {
@@ -695,6 +741,29 @@ func (st *Studio) dump(prefix string) Result {
 	return Result{Message: fmt.Sprintf("%d live values %s.", len(out), where), Data: out}
 }
 
+// diffLists returns entries of b missing from a, and of a missing from b,
+// counting duplicates.
+func diffLists(a, b []string) (added, removed []string) {
+	count := map[string]int{}
+	for _, x := range a {
+		count[x]++
+	}
+	for _, x := range b {
+		if count[x] > 0 {
+			count[x]--
+			continue
+		}
+		added = append(added, x)
+	}
+	for _, x := range a {
+		if count[x] > 0 {
+			count[x]--
+			removed = append(removed, x)
+		}
+	}
+	return added, removed
+}
+
 // Params lists catalog entries, one per path pattern.
 func Params(schema *dawschema.Catalog, filter string) Result {
 	params := schema.Patterns(filter)
@@ -711,7 +780,19 @@ func Params(schema *dawschema.Catalog, filter string) Result {
 	return Result{Message: msg + "; <n> is a channel or slot number.", Data: visible}
 }
 
+func dialogProblem(d Dialog) Problem {
+	return Problem{
+		Message: fmt.Sprintf("Studio Pro has the %q dialog open, so it is not taking commands.", d.Title),
+		Hint:    "close it in Studio Pro first",
+	}
+}
+
 func (st *Studio) unconfirmed(err error, what string) error {
+	if d, open := st.model().Dialog(); open && errors.Is(err, ErrUnconfirmed) {
+		p := dialogProblem(d)
+		p.Message = what + " was not confirmed: Studio Pro has the " + fmt.Sprintf("%q", d.Title) + " dialog open."
+		return p
+	}
 	switch {
 	case errors.Is(err, ErrUnconfirmed):
 		return Problem{

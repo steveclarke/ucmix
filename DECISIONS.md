@@ -138,3 +138,36 @@ SAY  The tempo is 120 bpm. The click is on, and the song played for two seconds 
 - `commandArgs` as an array of `{name, value}` is not understood: Studio Pro opened the command's dialog instead. A modal dialog blocks Undo and other commands until it closes.
 - Studio Pro announces dialogs to the remote: `ZM {"id": "BeginDialog","dialogType": 1,"dialogText": "","dialogTitle": "Add Insert to Selected Channels","firstButton": "Cancel","secondButton": "OK"}`, and `JM {"id": "ConfirmDialog","dialogResult": 0}` from the client presses the first button (Cancel), answered by `ZM {"id": "EndDialog"}`. Used live twice to close that dialog on Steve's screen; the test track and insert were then undone (song empty again).
 - Decision: ucdaw tracks open dialogs in the model; a command that opens one is cancelled at once and reported, so nothing is left blocking Studio Pro.
+
+## Tracks, plug-ins and presets (00:05 NDT)
+
+- `ucdaw track add [mono|stereo] --name X` runs `Track > Add Audio Track (...)`, waits for the new channel, and renames it with `PS mixer/channel/chN/label` (readback confirmed).
+- `ucdaw insert <channel> <plug-in> [--preset P]` selects the channel (`PV .../selected 1`; live, selection is exclusive: the other track went to 0), then runs `Track > Add Insert to Selected Channels` with `commandArgs {mode: "1", cid: <class ID>, preset: P or "default"}`, waits for `inserts/count` to grow, and reads back the slot's `deviceName` and `surface/focusPresetName`.
+- Preset argument: the preset's name relative to the plug-in's preset folder, without `.preset`. Live: `"Misc/50 Hz Removal"` loaded (focus preset name `50 Hz Removal`); `"50 Hz Removal"` alone and a full file path both fell back to `default`. ucdaw reports a missing preset plainly.
+- Plug-in names and class IDs come from Studio Pro's own `~/Library/Application Support/Fender/Studio Pro 8/Arm64/Plugins-en.settings` (294 effects and instruments on this Mac). `ucdaw plugins [filter]` lists them.
+- Inserting opened no plug-in windows (checked the window list).
+- Writing `surface/focusPresetName` does not load a preset (no echo).
+- Live run with serve:
+
+```
+$ ucdaw plugins rig
+1 plug-in match "rig".
+  Guitar Rig 7  Native Instruments  VST3
+$ ucdaw track add mono --name Guitar
+Added mono audio track Guitar.
+$ ucdaw insert Guitar "Guitar Rig 7"
+Added Guitar Rig 7 to Guitar (insert 1).
+$ ucdaw insert Guitar "Pro EQ" --preset "Misc/50 Hz Removal"
+Added Pro EQ to Guitar (insert 2) with preset 50 Hz Removal.
+$ ucdaw insert Guitar "Pro EQ" --preset Sparkle
+Added Pro EQ to Guitar (insert 3); Studio Pro has no preset "Sparkle" for it, so it has its default settings.
+$ ucdaw state
+120 bpm, 4/4, click on, loop off, stopped; 1 channel: Guitar (audio, mono; Guitar Rig 7, Pro EQ, Pro EQ 2).
+$ ucdaw command run "Edit > Undo"   (x4)
+Ran Edit > Undo: removed Pro EQ 2 from Guitar.
+Ran Edit > Undo: removed Pro EQ from Guitar.
+Ran Edit > Undo: removed Guitar Rig 7 from Guitar.
+Ran Edit > Undo: removed Guitar.
+```
+
+- Not testable here: Steve's own Guitar Rig "clean" preset. This MacBook has no Studio Pro user presets (`~/Documents/Studio One` holds none). If his clean sound is a Guitar Rig preset saved inside Guitar Rig rather than as a Studio Pro preset, he saves it once from Studio Pro's plug-in window preset menu; then `--preset <name>` loads it.

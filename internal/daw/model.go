@@ -51,6 +51,7 @@ type Model struct {
 	nums     map[string]float64
 	strs     map[string]string
 	commands []Command
+	dialog   *Dialog
 	seq      uint64
 	log      []Change
 	changed  chan struct{}
@@ -108,6 +109,24 @@ func (m *Model) Str(path string) (string, bool) {
 	defer m.mu.RUnlock()
 	v, ok := m.strs[path]
 	return v, ok
+}
+
+// Dialog is a modal dialog Studio Pro has open. While one is open, Studio Pro
+// does not run other commands.
+type Dialog struct {
+	Title   string   `json:"title"`
+	Text    string   `json:"text,omitempty"`
+	Buttons []string `json:"buttons,omitempty"`
+}
+
+// Dialog returns the dialog Studio Pro reports open, if any.
+func (m *Model) Dialog() (Dialog, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.dialog == nil {
+		return Dialog{}, false
+	}
+	return *m.dialog, true
 }
 
 // Commands returns Studio Pro's advertised command catalog.
@@ -252,9 +271,13 @@ type treeNode struct {
 // AdviseCommands) into the model. Other ids are ignored.
 func (m *Model) ApplyJSON(body []byte) error {
 	var head struct {
-		ID         string `json:"id"`
-		Part       string `json:"part"`
-		Categories []struct {
+		ID           string `json:"id"`
+		Part         string `json:"part"`
+		DialogTitle  string `json:"dialogTitle"`
+		DialogText   string `json:"dialogText"`
+		FirstButton  string `json:"firstButton"`
+		SecondButton string `json:"secondButton"`
+		Categories   []struct {
 			Commands []Command `json:"commands"`
 		} `json:"categories"`
 	}
@@ -262,6 +285,22 @@ func (m *Model) ApplyJSON(body []byte) error {
 		return fmt.Errorf("daw: decoding message: %w", err)
 	}
 	switch head.ID {
+	case "BeginDialog":
+		d := &Dialog{Title: head.DialogTitle, Text: head.DialogText}
+		for _, b := range []string{head.FirstButton, head.SecondButton} {
+			if b != "" {
+				d.Buttons = append(d.Buttons, b)
+			}
+		}
+		m.mutate(func(r func(string)) {
+			m.dialog = d
+			r("@dialog")
+		})
+	case "EndDialog":
+		m.mutate(func(r func(string)) {
+			m.dialog = nil
+			r("@dialog")
+		})
 	case "AdviseCommands":
 		var commands []Command
 		for _, c := range head.Categories {

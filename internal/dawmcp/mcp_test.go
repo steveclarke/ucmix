@@ -2,6 +2,7 @@ package dawmcp
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -60,6 +61,9 @@ func TestToolsMapToRequests(t *testing.T) {
 		{"set_param", map[string]any{"path": "mixer/channel/ch1/mute", "value": "on"}, daw.Request{Op: "set", Path: "mixer/channel/ch1/mute", Value: "on"}},
 		{"list_params", map[string]any{"filter": "mute"}, daw.Request{Op: "params", Filter: "mute"}},
 		{"list_commands", map[string]any{"filter": "undo"}, daw.Request{Op: "commands", Filter: "undo"}},
+		{"add_track", map[string]any{"name": "Guitar"}, daw.Request{Op: "add_track", Name: "Guitar"}},
+		{"add_insert", map[string]any{"channel": "Guitar", "plugin": "Guitar Rig 7", "preset": "Clean"}, daw.Request{Op: "insert", Path: "Guitar", Name: "Guitar Rig 7", Value: "Clean"}},
+		{"list_plugins", map[string]any{"filter": "rig"}, daw.Request{Op: "plugins", Filter: "rig"}},
 		{"run_command", map[string]any{"category": "Edit", "name": "Undo"}, daw.Request{Op: "run", Category: "Edit", Name: "Undo"}},
 	}
 	for _, tt := range tests {
@@ -73,7 +77,7 @@ func TestToolsMapToRequests(t *testing.T) {
 			if res.IsError || text(t, res) != "Done." {
 				t.Errorf("result = %q (error %v)", text(t, res), res.IsError)
 			}
-			if len(engine.got) != 1 || engine.got[0] != tt.want {
+			if len(engine.got) != 1 || !reflect.DeepEqual(engine.got[0], tt.want) {
 				t.Errorf("request = %+v, want %+v", engine.got, tt.want)
 			}
 		})
@@ -109,7 +113,7 @@ func TestEveryToolHasADescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 10 {
+	if len(tools.Tools) != 13 {
 		t.Errorf("tools = %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {

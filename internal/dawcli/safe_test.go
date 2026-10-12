@@ -11,11 +11,11 @@ import (
 
 func TestSafeStripsTerminalControls(t *testing.T) {
 	tests := map[string]string{
-		"Guitar":                    "Guitar",
-		"Bad\x1b]0;pwned\x07Name":   "Bad?]0;pwned?Name",
-		"C1\u009bcsi":               "C1?csi",
-		"del\x7f":                   "del?",
-		"tab\tok, café, é中": "tab\tok, café, é中",
+		"Guitar":                  "Guitar",
+		"Bad\x1b]0;pwned\x07Name": "Bad?]0;pwned?Name",
+		"C1\u009bcsi":             "C1?csi",
+		"del\x7f":                 "del?",
+		"tab\tok, café, é中":       "tab\tok, café, é中",
 	}
 	for in, want := range tests {
 		if got := safe(in); got != want {

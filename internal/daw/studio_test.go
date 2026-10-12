@@ -46,6 +46,7 @@ func newStudio(t *testing.T) (*Studio, *fakeStudio) {
 		onCommand: map[string][]proto.Frame{
 			"Track|Add Audio Track (mono)": {
 				pv("mixer/channel/count", 0.001),
+				pv("mixer/channel/ch1/selected", 1),
 				ps("mixer/channel/ch1/label", "Track 1"),
 				ps("mixer/channel/ch1/type", "AudioTrack"),
 				ps("mixer/channel/ch1/speakerFormat", "Mono"),
@@ -219,5 +220,34 @@ func TestDumpListsLiveValues(t *testing.T) {
 	}
 	if !found || !strings.HasSuffix(res.Message, "under transport.") {
 		t.Errorf("dump = %q %+v", res.Message, values)
+	}
+}
+
+func TestRenameReadsLikeAMusician(t *testing.T) {
+	st, fake := newStudio(t)
+	fake.mu.Lock()
+	fake.frames <- pv("mixer/channel/count", 0.001)
+	fake.frames <- ps("mixer/channel/ch1/label", "Track 1")
+	fake.mu.Unlock()
+	_ = st.session.WaitFor(context.Background(), func(m *Model) bool { s, _ := m.Str("mixer/channel/ch1/label"); return s == "Track 1" })
+	fake.echoStrings = true
+	if got := do(t, st, Request{Op: "set", Path: "mixer/channel/ch1/label", Value: "Guitar"}); got != "Renamed Track 1 to Guitar." {
+		t.Errorf("rename = %q", got)
+	}
+}
+
+func TestRunCancelsADialogItOpens(t *testing.T) {
+	st, fake := newStudio(t)
+	fake.onCommand["Track|Add Audio Track (mono)"] = []proto.Frame{
+		zm(t, `{"id": "BeginDialog","dialogType": 1,"dialogTitle": "Add Tracks","firstButton": "Cancel","secondButton": "OK"}`),
+	}
+	fake.onConfirm = []proto.Frame{zm(t, `{"id": "EndDialog"}`)}
+	_, err := st.Do(context.Background(), Request{Op: "run", Category: "Track", Name: "Add Audio Track (mono)"})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, `opened the "Add Tracks" dialog`) {
+		t.Errorf("err = %v", err)
+	}
+	if _, open := st.model().Dialog(); open {
+		t.Error("dialog left open")
 	}
 }

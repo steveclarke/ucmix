@@ -48,6 +48,17 @@ type commandIn struct {
 	Name     string `json:"name" jsonschema:"command name exactly as list_commands shows it, e.g. Add Audio Track (mono)"`
 }
 
+type trackIn struct {
+	Format string `json:"format,omitempty" jsonschema:"mono (default) or stereo"`
+	Name   string `json:"name,omitempty" jsonschema:"name for the new track, e.g. Guitar"`
+}
+
+type insertIn struct {
+	Channel string `json:"channel" jsonschema:"track name (Guitar), number (2) or path (mixer/channel/ch2)"`
+	Plugin  string `json:"plugin" jsonschema:"plug-in name as list_plugins shows it, e.g. Guitar Rig 7 or Pro EQ"`
+	Preset  string `json:"preset,omitempty" jsonschema:"one of the plug-in's Studio Pro presets by name; a subfolder goes first (Misc/50 Hz Removal); empty for default settings"`
+}
+
 type valuesIn struct {
 	Prefix string `json:"prefix,omitempty" jsonschema:"path prefix, e.g. mixer/channel/ch1 or transport; empty returns the whole song"`
 }
@@ -57,7 +68,7 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "studio-pro-ucnet", Title: "Studio Pro (UCNET)", Version: version}, &mcp.ServerOptions{
 		Instructions: "Drives the Fender Studio Pro song that is open on this network, the way the Studio Pro Remote app does. " +
 			"Every change is read back from Studio Pro before the tool answers, and each answer is one line to pass on to the musician as is. " +
-			"Start with get_song to see tracks and tempo. For anything without its own tool (adding tracks, undo, zoom, editing), " +
+			"Start with get_song to see tracks and tempo. add_track and add_insert build a track with its plug-ins. For anything without its own tool (undo, zoom, editing), " +
 			"find the command with list_commands and run it with run_command; most song changes undo with run_command Edit / Undo.",
 	})
 	call := func(ctx context.Context, req daw.Request, withData bool) (*mcp.CallToolResult, any, error) {
@@ -144,6 +155,30 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			"Returns matching category and name pairs for run_command.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in filterIn) (*mcp.CallToolResult, any, error) {
 		return call(ctx, daw.Request{Op: "commands", Filter: in.Filter}, true)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "add_track",
+		Description: "Add a mono or stereo audio track and name it. The new track ends up selected. " +
+			"Returns one line such as \"Added mono audio track Guitar.\" Undo with run_command Edit / Undo.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in trackIn) (*mcp.CallToolResult, any, error) {
+		return call(ctx, daw.Request{Op: "add_track", Action: in.Format, Name: in.Name}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "add_insert",
+		Description: "Put an effect plug-in on a channel, after its existing inserts, optionally loading one of its Studio Pro presets, " +
+			"and confirm both. Returns one line such as \"Added Guitar Rig 7 to Guitar (insert 1) with preset Clean.\" " +
+			"If the preset is not found the plug-in still goes in with default settings and the answer says so. Undo with run_command Edit / Undo.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in insertIn) (*mcp.CallToolResult, any, error) {
+		return call(ctx, daw.Request{Op: "insert", Path: in.Channel, Name: in.Plugin, Value: in.Preset}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_plugins",
+		Description: "Search the effects and instruments Studio Pro has scanned on this Mac by name or vendor. Use it to find the exact name for add_insert.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in filterIn) (*mcp.CallToolResult, any, error) {
+		return call(ctx, daw.Request{Op: "plugins", Filter: in.Filter}, true)
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

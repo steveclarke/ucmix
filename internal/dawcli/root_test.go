@@ -3,6 +3,7 @@ package dawcli
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -54,6 +55,9 @@ func TestCommandsBuildRequests(t *testing.T) {
 		{[]string{"state", "transport"}, daw.Request{Op: "dump", Filter: "transport"}},
 		{[]string{"command", "list", "zoom"}, daw.Request{Op: "commands", Filter: "zoom"}},
 		{[]string{"command", "run", "Track", "Add Audio Track (mono)"}, daw.Request{Op: "run", Category: "Track", Name: "Add Audio Track (mono)"}},
+		{[]string{"track", "add", "--name", "Guitar"}, daw.Request{Op: "add_track", Name: "Guitar"}},
+		{[]string{"track", "add", "stereo"}, daw.Request{Op: "add_track", Action: "stereo"}},
+		{[]string{"insert", "Guitar", "Guitar Rig 7", "--preset", "Clean"}, daw.Request{Op: "insert", Path: "Guitar", Name: "Guitar Rig 7", Value: "Clean"}},
 		{[]string{"command", "run", "Edit > Undo"}, daw.Request{Op: "run", Category: "Edit > Undo"}},
 	}
 	for _, tt := range tests {
@@ -63,7 +67,7 @@ func TestCommandsBuildRequests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(engine.got) != 1 || engine.got[0] != tt.want {
+			if len(engine.got) != 1 || !reflect.DeepEqual(engine.got[0], tt.want) {
 				t.Errorf("request = %+v, want %+v", engine.got, tt.want)
 			}
 			if out != "ok\n" {
