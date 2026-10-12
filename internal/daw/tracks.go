@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveclarke/ucmix/internal/dawplugins"
+	"github.com/steveclarke/ucmix/internal/dawschema"
 )
 
 // Test seam: the plug-ins Studio Pro has scanned on this Mac.
@@ -181,4 +182,65 @@ func Plugins(filter string) (Result, error) {
 		msg += fmt.Sprintf(" match %q", filter)
 	}
 	return Result{Message: msg + ".", Data: out}, nil
+}
+
+// fader reads or sets a channel's fader in dB: "set" to a level, "up" or
+// "down" by an amount, or read it.
+func (st *Studio) fader(ctx context.Context, req Request) (Result, error) {
+	ch, err := st.resolveChannel(req.Path)
+	if err != nil {
+		return Result{}, err
+	}
+	p, err := st.param(ch.Path + "/volume")
+	if err != nil {
+		return Result{}, err
+	}
+	wire, ok := st.model().Num(p.Path)
+	if !ok {
+		return Result{}, Problem{Message: fmt.Sprintf("Studio Pro has not reported %s's fader", ch.Name)}
+	}
+	before := dawschema.FaderDB(wire)
+	data := func(db float64) map[string]any {
+		out := map[string]any{"channel": ch.Path, "db": nil}
+		if !math.IsInf(db, -1) {
+			out["db"] = math.Round(db*10) / 10
+		}
+		return out
+	}
+	value := strings.TrimSpace(req.Value)
+	if req.Action == "" && value == "" || req.Action == "get" {
+		return Result{Message: fmt.Sprintf("%s is at %s.", ch.Name, dawschema.FormatDB(before)), Data: data(before)}, nil
+	}
+	var target float64
+	switch req.Action {
+	case "up", "down":
+		amount, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(strings.ToLower(value), "db")), 64)
+		if err != nil || math.IsNaN(amount) || amount <= 0 || amount > 100 {
+			return Result{}, Problem{Message: fmt.Sprintf("say how many dB to move %s, e.g. 3", req.Action)}
+		}
+		if req.Action == "down" {
+			amount = -amount
+		}
+		if math.IsInf(before, -1) {
+			return Result{}, Problem{Message: fmt.Sprintf("%s's fader is all the way down", ch.Name), Hint: "set a level instead, e.g. -20"}
+		}
+		target = before + amount
+		if target > 10 {
+			return Result{}, Problem{Message: fmt.Sprintf("%s is at %s; the fader stops at +10 dB", ch.Name, dawschema.FormatDB(before))}
+		}
+		value = strconv.FormatFloat(target, 'f', -1, 64)
+	}
+	newWire, err := p.ParseHuman(value)
+	if err != nil {
+		return Result{}, Problem{Message: err.Error()}
+	}
+	if err := st.session.SetNum(ctx, p.Path, newWire); err != nil {
+		return Result{}, st.unconfirmed(err, "Moving "+ch.Name+"'s fader")
+	}
+	got, _ := st.model().Num(p.Path)
+	after := dawschema.FaderDB(got)
+	return Result{
+		Message: fmt.Sprintf("%s at %s (was %s).", ch.Name, dawschema.FormatDB(after), dawschema.FormatDB(before)),
+		Data:    data(after),
+	}, nil
 }

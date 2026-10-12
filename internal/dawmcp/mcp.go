@@ -37,7 +37,7 @@ type pathIn struct {
 
 type setIn struct {
 	Path  string `json:"path" jsonschema:"parameter path from list_params with <n> filled in, e.g. mixer/channel/ch2/mute"`
-	Value string `json:"value" jsonschema:"value in the parameter's own units: on/off for switches, a number for ranges (volume is fader travel 0-100), a list entry, or text for names"`
+	Value string `json:"value" jsonschema:"value in the parameter's own units: on/off for switches, a number for ranges (volume is dB, e.g. -6), a list entry, or text for names"`
 }
 
 type filterIn struct {
@@ -48,6 +48,12 @@ type commandIn struct {
 	Category string            `json:"category" jsonschema:"command category exactly as list_commands shows it, e.g. Track"`
 	Name     string            `json:"name" jsonschema:"command name exactly as list_commands shows it, e.g. Add Audio Track (mono)"`
 	Args     map[string]string `json:"args,omitempty" jsonschema:"optional command arguments as a Studio Pro macro carries them, e.g. {\"Bars\": \"4\"} for Transport / Forward Bar; a command that needs arguments and gets none opens a dialog, which ucdaw cancels"`
+}
+
+type faderIn struct {
+	Track  string   `json:"track" jsonschema:"track name (Pad), number (2) or path"`
+	DB     *float64 `json:"db,omitempty" jsonschema:"set the fader to this level in dB (0 is unity, +10 the top); leave empty to read it"`
+	Change float64  `json:"change,omitempty" jsonschema:"move the fader by this many dB instead: -3 to bring it down 3 dB, 2 to raise it 2 dB"`
 }
 
 type audioIn struct {
@@ -245,6 +251,23 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			"Commands act on the current selection, like the menu items they are. Undo with category Edit, name Undo.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in commandIn) (*mcp.CallToolResult, any, error) {
 		return call(ctx, daw.Request{Op: "run", Category: in.Category, Name: in.Name, Args: in.Args}, false)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "fader",
+		Description: "Read or set a track's fader in dB, on Studio Pro's own fader curve (matches the console: 0 dB unity, +10 dB top). " +
+			"\"Bring the pad down 3 dB\" is change -3. Read back from Studio Pro: \"Pad at -3 dB (was 0 dB).\" Mute and solo are set_param .../mute and .../solo.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in faderIn) (*mcp.CallToolResult, any, error) {
+		req := daw.Request{Op: "fader", Path: in.Track}
+		switch {
+		case in.Change > 0:
+			req.Action, req.Value = "up", strconv.FormatFloat(in.Change, 'f', -1, 64)
+		case in.Change < 0:
+			req.Action, req.Value = "down", strconv.FormatFloat(-in.Change, 'f', -1, 64)
+		case in.DB != nil:
+			req.Action, req.Value = "set", strconv.FormatFloat(*in.DB, 'f', -1, 64)
+		}
+		return call(ctx, req, false)
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

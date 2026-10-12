@@ -83,6 +83,9 @@ func (p Param) ToWire(value float64) (float64, error) {
 			trimFloat(p.Min), trimFloat(p.Max),
 		)
 	}
+	if p.Curve == "fadercurve" {
+		return FaderWire(value), nil
+	}
 	if p.Max == p.Min {
 		return 0, nil
 	}
@@ -91,6 +94,9 @@ func (p Param) ToWire(value float64) (float64, error) {
 
 // FromWire converts a 0..1 wire value to the parameter's own units.
 func (p Param) FromWire(wire float64) float64 {
+	if p.Curve == "fadercurve" {
+		return math.Max(FaderDB(wire), MinFaderDB)
+	}
 	value := p.Min + wire*(p.Max-p.Min)
 	if p.Type == Int || p.Type == List || p.Type == Toggle {
 		return math.Round(value)
@@ -117,6 +123,8 @@ func (p Param) Format(wire float64) string {
 		return strconv.Itoa(int(value))
 	}
 	switch p.Units {
+	case "dB":
+		return FormatDB(FaderDB(wire))
 	case "bpm.value":
 		return trimFloat(math.Round(value*100)/100) + " bpm"
 	case "percent":
@@ -153,11 +161,57 @@ func (p Param) ParseHuman(text string) (float64, error) {
 			strings.Join(p.Options, ", "), text,
 		)
 	}
+	if p.Curve == "fadercurve" {
+		return parseFader(p, text)
+	}
 	value, err := strconv.ParseFloat(text, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s needs a number, not %q", p.Path, text)
 	}
 	return p.ToWire(value)
+}
+
+// FormatDB renders a level the way Studio Pro's console does: one decimal,
+// "0 dB", "+3.5 dB", "-inf dB".
+func FormatDB(db float64) string {
+	if math.IsInf(db, -1) || db <= MinFaderDB {
+		return "-inf dB"
+	}
+	r := math.Round(db*10) / 10
+	if r == 0 {
+		return "0 dB"
+	}
+	s := strconv.FormatFloat(r, 'f', -1, 64)
+	if r > 0 {
+		s = "+" + s
+	}
+	return s + " dB"
+}
+
+// parseFader takes "-6", "-6 dB", "+3dB", "-inf" or "off" as dB, and "60%"
+// as fader travel.
+func parseFader(p Param, text string) (float64, error) {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if strings.HasSuffix(t, "%") {
+		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(t, "%")), 64)
+		if err != nil || math.IsNaN(v) || v < 0 || v > 100 {
+			return 0, fmt.Errorf("fader travel is 0%% to 100%%, not %q", text)
+		}
+		return v / 100, nil
+	}
+	t = strings.TrimSpace(strings.TrimSuffix(t, "db"))
+	switch t {
+	case "-inf", "-oo", "-∞", "off", "silent":
+		return 0, nil
+	}
+	v, err := strconv.ParseFloat(t, 64)
+	if err != nil || math.IsNaN(v) {
+		return 0, fmt.Errorf("%s needs a level in dB (e.g. -6) or fader travel (e.g. 60%%), not %q", p.Path, text)
+	}
+	if v > p.Max+1e-9 {
+		return 0, fmt.Errorf("a fader goes up to +10 dB, not %s", strconv.FormatFloat(v, 'f', -1, 64))
+	}
+	return FaderWire(v), nil
 }
 
 func trimFloat(v float64) string {
@@ -444,9 +498,9 @@ func (b *builder) param(p node) Param {
 	out.Max = parseFloat(p.attr("max"), out.Max)
 	out.Default = parseFloat(p.attr("def"), out.Default)
 	if out.Curve == "fadercurve" {
-		// Studio Pro's fader curve is not published; ucdaw shows and takes
-		// fader travel as a percentage of the wire position instead of guessing dB.
-		out.Min, out.Max, out.Default, out.Units = 0, 100, 0, "percent"
+		// Faders read and take dB through Studio Pro's measured fader curve
+		// (fader.go); the gain range itself (0..3.1622) is never shown.
+		out.Min, out.Max, out.Default, out.Units = MinFaderDB, 10, 0, "dB"
 	}
 	switch out.Type {
 	case List:

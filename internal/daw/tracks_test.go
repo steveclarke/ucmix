@@ -105,3 +105,32 @@ func TestPluginsFilter(t *testing.T) {
 		t.Errorf("Plugins = %q, %v", res.Message, err)
 	}
 }
+
+func TestFaderInDB(t *testing.T) {
+	st, fake := studioWithTrack(t)
+	fake.mu.Lock()
+	fake.frames <- pv("mixer/channel/ch1/volume", 0.76)
+	fake.mu.Unlock()
+	_ = st.session.WaitFor(context.Background(), NumIs("mixer/channel/ch1/volume", 0.76))
+	if got := do(t, st, Request{Op: "fader", Path: "Guitar"}); got != "Guitar is at 0 dB." {
+		t.Errorf("read = %q", got)
+	}
+	if got := do(t, st, Request{Op: "fader", Path: "Guitar", Action: "down", Value: "3"}); got != "Guitar at -3 dB (was 0 dB)." {
+		t.Errorf("down = %q", got)
+	}
+	if got := do(t, st, Request{Op: "fader", Path: "Guitar", Action: "set", Value: "-10"}); got != "Guitar at -10 dB (was -3 dB)." {
+		t.Errorf("set = %q", got)
+	}
+	if got := do(t, st, Request{Op: "song"}); !strings.Contains(got, "Guitar (audio, mono, -10 dB)") {
+		t.Errorf("song = %q", got)
+	}
+	for _, bad := range []Request{
+		{Op: "fader", Path: "Guitar", Action: "up", Value: "30"},
+		{Op: "fader", Path: "Guitar", Action: "up", Value: "lots"},
+		{Op: "fader", Path: "Guitar", Action: "set", Value: "+11"},
+	} {
+		if _, err := st.Do(context.Background(), bad); err == nil {
+			t.Errorf("%+v accepted", bad)
+		}
+	}
+}

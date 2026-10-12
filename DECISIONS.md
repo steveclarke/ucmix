@@ -321,3 +321,29 @@ Added Guitar Rig 7 to Gtr (insert 2); Studio Pro has no preset "Clean" for it, s
   (Messages then said "favourite"; now "favorite".) All undone afterwards.
 - **Known glitch (round 1 code):** Undo reports while removing several renamed channels in a row named the wrong channel twice ("removed Guitar Rig 7 from X" for Gtr). The song itself was right. Cause: channels renumber as one is removed and the label updates arrive across the settle window. Logged, not fixed tonight.
 - An arranger duplicate with content once needed two Undo presses: the first reported no change, the second reverted the sections and content.
+
+## Step 4: faders in dB (03:00–03:25 NDT)
+
+- `fadercurve` is not in any file Studio Pro ships (it lives in the binaries), so it was measured: the console (`View / Console`) shows each fader's level as text, and ucdaw set `mixer/channel/ch2/volume` to 36 wire positions and read Studio Pro's text from a capture of its window after each.
+- Result: straight lines in dB between (0.04, −60), (0.16, −40), (0.52, −10), (0.76, 0) and (1.0, +10); below 0.04 the same line continues at 2100 dB per unit (−139.8 at 0.002), and 0 is −inf. Every measured point matches to within 0.05 dB (the console's rounding). +10 dB = gain 3.1622, the top of the published range, which confirms the scale.
+
+```
+wire  1    .95  .9   .85  .8   .76 .7   .65  .6   .55  .53  .52  .51   .5    .45   .4  .35   .3    .25   .2    .17   .16 .15   .1  .05   .045  .04 .035  .03 .025  .02  .015   .01  .005  .002  0
+dB   +10  +7.9 +5.8 +3.7 +1.7  0  -2.5 -4.6 -6.7 -8.8 -9.6 -10 -10.8 -11.7 -15.8 -20 -24.2 -28.3 -32.5 -36.7 -39.2 -40 -41.7 -50 -58.3 -59.2 -60 -70.5 -81 -91.5 -102 -112.5 -123 -133.5 -139.8 -oo
+```
+
+- Shipped: every `fadercurve` parameter (channel volume, send and cue-mix levels) now reads and takes dB (`param set …/volume -6`, "60%" still sets travel); `ucdaw fader <track> [dB] [--up N|--down N]`; MCP `fader` (`change: -3` for "bring the pad down 3 dB"); `get_song` lists a track's level when it is not 0 dB, and "muted".
+- `fader` reads its own arguments because cobra takes "-6" for a flag.
+- Live check against the console (03:20 NDT), ucdaw's answer then the console's text:
+
+```
+$ ucdaw fader Take -6          Take at -6 dB (was 0 dB).        console: -6.0
+$ ucdaw fader Take --down 3    Take at -9 dB (was -6 dB).       console: -9.0
+$ ucdaw fader Take --up 1.5    Take at -7.5 dB (was -9 dB).     console: -7.5
+$ ucdaw fader Take -33.3       Take at -33.3 dB (was -7.5 dB).  console: -33.3
+$ ucdaw fader Take +4.2        Take at +4.2 dB (was -33.3 dB).  console: +4.2
+$ ucdaw fader Take -inf        Take at -inf dB (was +4.2 dB).   console: -oo
+$ ucdaw fader Take -75         Take at -75 dB (was -inf dB).    console: -75.0
+```
+
+  Fader left at 0 dB; the console view was closed again.

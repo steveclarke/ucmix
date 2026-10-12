@@ -143,3 +143,28 @@ func TestSplitPlacement(t *testing.T) {
 		t.Error("missing before/after accepted")
 	}
 }
+
+func TestFaderRequest(t *testing.T) {
+	o := &options{}
+	cases := map[string]daw.Request{
+		"Pad":             {Op: "fader", Path: "Pad"},
+		"Pad -6":          {Op: "fader", Path: "Pad", Action: "set", Value: "-6"},
+		"Pad --down 3":    {Op: "fader", Path: "Pad", Action: "down", Value: "3"},
+		"Pad --up=1.5":    {Op: "fader", Path: "Pad", Action: "up", Value: "1.5"},
+		"Pad -inf --json": {Op: "fader", Path: "Pad", Action: "set", Value: "-inf"},
+	}
+	for in, want := range cases {
+		got, help, err := faderRequest(strings.Fields(in), o)
+		if err != nil || help || !reflect.DeepEqual(got, want) {
+			t.Errorf("%q = %+v, %v, %v", in, got, help, err)
+		}
+	}
+	if !o.json {
+		t.Error("--json not applied")
+	}
+	for _, bad := range []string{"", "Pad -6 --down 3", "Pad --up", "a b c"} {
+		if _, _, err := faderRequest(strings.Fields(bad), &options{}); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

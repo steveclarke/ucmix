@@ -131,6 +131,8 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return st.section(ctx, req)
 	case "audio":
 		return st.audio(ctx, req)
+	case "fader":
+		return st.fader(ctx, req)
 	}
 	return Result{}, Problem{Message: fmt.Sprintf("unknown request %q", req.Op)}
 }
@@ -640,6 +642,12 @@ func (st *Studio) song() Result {
 		desc := ch.Name + " (" + kindWord(ch.Kind)
 		if ch.Format != "" && ch.Kind == "AudioTrack" {
 			desc += ", " + strings.ToLower(ch.Format)
+		}
+		if ch.Volume != "" && ch.Volume != "0 dB" {
+			desc += ", " + ch.Volume
+		}
+		if ch.Mute {
+			desc += ", muted"
 		}
 		if len(ch.Inserts) > 0 {
 			desc += "; " + strings.Join(ch.Inserts, ", ")
