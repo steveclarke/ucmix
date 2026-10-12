@@ -26,7 +26,7 @@ $ ucdawpoc discover --json
     (`values` / `children` / `states` / `ranges` tree of the live song: transport, metronome, mixer channels, inserts).
   - `TC` (`LpSt`, `LpEn`: loop start/end), `BO` (`EvDL` event lists: markers, arranger, chords, lyrics), then `JM SubscriptionReply`.
 - **Values on the wire are normalized 0..1** for ranged params (tempo 0.282 = 120 bpm on 10..400; counts are n/1000).
-- **InvokeCommand cracked first try** (23:20 NDT):
+- **InvokeCommand cracked first try** (23:05 NDT):
 
 ```
 >>> JM {"id": "InvokeCommand","commandCategory": "Transport","commandName": "Click"}
@@ -41,7 +41,7 @@ $ ucdawpoc discover --json
 
 - New-channel updates arrive as `PV` (float), `PS` (key, NUL, 2 bytes, string, NUL) and `PC` (key, NUL, 2 bytes, uint32 colour) frames, so the live model can be kept current from ordinary parameter frames.
 
-## Security review: resource caps (23:20 NDT)
+## Security review: resource caps
 
 An automatic review flagged unbounded allocation in `internal/daw/model.go` and `session.go`. Fixed in proportion:
 
@@ -51,26 +51,26 @@ An automatic review flagged unbounded allocation in `internal/daw/model.go` and 
 - Model: at most 400,000 distinct paths (`MaxPaths`; the real model has about 156,000); new paths past that are dropped, existing ones still update. The change log was already a bounded ring.
 - One test per cap.
 
-## Security review 2: serve socket and discovery trust (23:50 NDT)
+## Security review 2: serve socket and discovery trust
 
 - **Socket squatting.** The serve socket now lives in a private per-user directory (`~/Library/Caches/ucdaw/serve.sock` on macOS, `$XDG_RUNTIME_DIR/ucdaw/` on Linux), created 0700; an existing directory must be a real directory owned by the user (mode is tightened if loose). Serve removes a leftover path only if it is a socket owned by the user, and otherwise refuses. Both ends check peer credentials (`LOCAL_PEERCRED` on macOS, `SO_PEERCRED` on Linux): the CLI talks only to a server run by the same user, and the server drops clients of other users. Tests cover each check.
 - **Discovery trust.** My first fast path returned on the first Studio Pro announcement, which dropped the July "error on more than one" rule. Restored: discovery keeps listening 1.2 s after the first match (Studio Pro announces about once a second), so two instances still error. Kept: DAW class only, `.studioapp8` identity only, the mixer is never chosen, and the connect address is the announcement's UDP source, never a payload field. New: `--host <ip>` / `UCDAW_HOST` pins Studio Pro to one IP for discovery and the endpoint cache. Tests cover each rule.
 - Residual, accepted for a home network: an unpinned LAN host could still announce as Studio Pro; pinning closes that.
 
-## Security review 3: panics, file modes, terminal escapes (00:05 NDT)
+## Security review 3: panics, file modes, terminal escapes
 
 - **Panic on LAN input.** `ucdaw discover` indexed `strings.Fields(version)[0]`, which panics on a blank version from a crafted announcement. Now guarded (`discoverLine`). Self-review of every wire read (`parseAnnouncement`, PV/PS/PC/PE/JM/CK decoders, ZM inflate, CK reassembly, capture reader): all length-checked; added fuzz targets `FuzzParseAnnouncement` and `FuzzModelApplyFrame` (ran 15 s and 20 s, no crashes) plus a table test that truncated PV/PS/PC/ZM payloads return errors.
 - **File modes.** `ucdaw state record` captures are created 0600 (an existing file is tightened too). The endpoint cache was already 0600 in a 0700 directory; the serve socket is 0600 in a 0700 directory. Hugo capture files set to 0600, directory 0700.
 - **Terminal escapes.** Every styled line (messages, list rows, hints, errors, discover lines, serve log) goes through `safe()`, which turns C0/C1 controls, ESC and DEL into `?` (tabs kept in messages, replaced in table cells). `--json` output is left to the JSON encoder, which escapes control characters.
 
-## Steps 2 and 3: schema and core CLI (00:20 NDT)
+## Steps 2 and 3: schema and core CLI
 
 - `internal/dawschema` expands Studio Pro's own `dawremote.xml` (loaded from the app bundle at runtime, `--schema`/`UCDAW_SCHEMA` to override): 156,443 paths, 399 patterns. Ranged values are converted to and from the 0..1 wire. Fader volume is shown as travel percent because Studio Pro's `fadercurve` is unpublished; dB is not guessed.
 - Endpoint cache (`~/Library/Caches/ucdaw/endpoint.json`) makes a direct command ~0.35 s; a cold discovery is ~1.5–3.7 s.
 - Live findings:
   - **Stop:** one live Stop was answered by `stop=1, stop=0` with `start` still 1. Stop now waits for `start=0` and presses once more if needed.
   - **Loop:** the loop button carries its target (`PV transport/loop` 1 = on, 0 = off), not a toggle. Studio Pro refuses loop on (echoes 0) while the song has no loop range; ucdaw says so and suggests `Transport > Loop Selection`. A test set a loop end 2 bars in (`Transport > Forward Bar` ×2, `Set Loop End`); Undo did not revert it, so the empty song now has a loop range of 0–2 bars. Loop is off.
-- Live run (direct mode, 00:18 NDT):
+- Live run (direct mode, 23:22 NDT):
 
 ```
 $ ucdaw state
@@ -106,3 +106,11 @@ $ ucdaw params tempo
 $ ucdaw command list "zoom full"
 4 Studio Pro commands match "zoom full".
 ```
+
+## Step 6: serve (23:27 NDT)
+
+- `ucdaw serve` holds one subscribed session, sends its own keep-alive every second on the session's connection ID, and reconnects with backoff (1 s doubling to 5 s) when the session ends. CLI commands use it automatically when the socket answers; `--direct` bypasses it.
+- Requests are serialized so command change reports do not mix, except Stop, which never waits behind a timed play.
+- Live, with serve running: `state` 0.00 s, `click off` 0.04 s, `click on` 0.04 s, `transport play --for 1s` 1.17 s (three runs). One `play --bars 1` took 3.24 s: the first Stop was ignored and the retry stopped it.
+- The model stays current from Studio Pro's own updates: tempo set to 100 and a stereo track added over a separate `--direct` connection both showed up in serve's `tempo` and `state` at once (then undone, tempo back to 120).
+- **Untested live:** reconnect after Studio Pro restarts, because the brief forbids quitting Studio Pro. The code path is the same `Connect` the CLI uses; the background loop retries after `Done`.
