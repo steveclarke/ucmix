@@ -124,7 +124,7 @@ func printResult(w io.Writer, o *options, res daw.Result) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(res)
 	}
-	if _, err := fmt.Fprintln(w, res.Message); err != nil {
+	if _, err := fmt.Fprintln(w, safe(res.Message)); err != nil {
 		return err
 	}
 	return printRows(w, res.Data)
@@ -146,14 +146,20 @@ func printRows(w io.Writer, data any) error {
 	for _, row := range rows {
 		switch {
 		case row["category"] != nil:
-			fmt.Fprintf(tw, "  %v\t%v\n", row["category"], row["name"])
+			fmt.Fprintf(tw, "  %s\t%s\n", cell(row["category"]), cell(row["name"]))
 		case row["pattern"] != nil:
-			fmt.Fprintf(tw, "  %v\t%v\t%s\n", row["pattern"], row["type"], describeParam(row))
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", cell(row["pattern"]), cell(row["type"]), cell(describeParam(row)))
 		case row["value"] != nil:
-			fmt.Fprintf(tw, "  %v\t%v\n", row["path"], row["value"])
+			fmt.Fprintf(tw, "  %s\t%s\n", cell(row["path"]), cell(row["value"]))
 		}
 	}
 	return tw.Flush()
+}
+
+// cell renders one table cell from Studio Pro data: no control characters and
+// no tabs (a tab would break the columns).
+func cell(v any) string {
+	return strings.ReplaceAll(safe(fmt.Sprint(v)), "\t", " ")
 }
 
 func describeParam(row map[string]any) string {
@@ -201,14 +207,22 @@ func newDiscoverCmd(o *options) *cobra.Command {
 				return daw.NotFound
 			}
 			for _, e := range found {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %s on %s (%s:%d)\n",
-					e.Product, strings.Fields(e.Version)[0], e.Name, e.IP, e.ControlPort)
+				fmt.Fprintln(cmd.OutOrStdout(), discoverLine(e))
 			}
 			return nil
 		},
 	}
 	cmd.Flags().DurationVar(&timeout, "timeout", 3*time.Second, "how long to listen")
 	return cmd
+}
+
+// discoverLine renders one announcement; every field came off the LAN.
+func discoverLine(e daw.Endpoint) string {
+	version := e.Version
+	if fields := strings.Fields(version); len(fields) > 0 {
+		version = fields[0]
+	}
+	return safe(fmt.Sprintf("%s %s on %s (%s:%d)", e.Product, version, e.Name, e.IP, e.ControlPort))
 }
 
 func newTransportCmd(o *options) *cobra.Command {
@@ -366,7 +380,7 @@ func newRecordCmd(o *options) *cobra.Command {
 			"keep it out of public repositories.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f, err := os.Create(args[0])
+			f, err := createCapture(args[0])
 			if err != nil {
 				return err
 			}
@@ -400,6 +414,20 @@ func newRecordCmd(o *options) *cobra.Command {
 	}
 	cmd.Flags().DurationVar(&duration, "for", 5*time.Second, "how long to record after subscribing")
 	return cmd
+}
+
+// createCapture opens a capture file owner-only: captures hold licence and
+// song data. An existing file is tightened to 0600 as well.
+func createCapture(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 func newCommandCmd(o *options) *cobra.Command {
@@ -457,7 +485,7 @@ func newServeCmd(o *options) *cobra.Command {
 					return daw.Connect(ctx, daw.DefaultCacheFile(), o.host)
 				},
 				Log: func(format string, args ...any) {
-					fmt.Fprintf(logw, time.Now().Format("15:04:05")+" "+format+"\n", args...)
+					fmt.Fprintln(logw, time.Now().Format("15:04:05")+" "+safe(fmt.Sprintf(format, args...)))
 				},
 			}
 			socket := o.socket
@@ -488,11 +516,11 @@ func Execute() {
 func printError(w io.Writer, err error) {
 	var p daw.Problem
 	if errors.As(err, &p) {
-		fmt.Fprintln(w, p.Message)
+		fmt.Fprintln(w, safe(p.Message))
 		if p.Hint != "" {
-			fmt.Fprintln(w, "  "+p.Hint)
+			fmt.Fprintln(w, "  "+safe(p.Hint))
 		}
 		return
 	}
-	fmt.Fprintln(w, "Error:", err)
+	fmt.Fprintln(w, "Error:", safe(err.Error()))
 }
