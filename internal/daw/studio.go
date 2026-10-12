@@ -182,10 +182,13 @@ func (st *Studio) transport(ctx context.Context, req Request) (Result, error) {
 		}
 		return Result{Message: "Stopped."}, nil
 	case "rtz", "return":
-		if err := st.session.Press(ctx, "transport/returnToZero", 1); err != nil {
+		// The returnToZero button gesture did nothing live; Studio Pro's own
+		// command does. Studio Pro reports no song position, so this is sent,
+		// not read back.
+		if err := st.session.Invoke(ctx, "Transport", "Return to Zero", nil); err != nil {
 			return Result{}, err
 		}
-		return Result{Message: "Back to the start of the song."}, nil
+		return Result{Message: "Returned to the start of the song."}, nil
 	case "loop", "loop-on", "loop-off":
 		return st.loop(ctx, req.Action, req.Value)
 	}
@@ -538,6 +541,29 @@ func userMarkers(all []Event) []Event {
 	return out
 }
 
+// eventChanges describes markers or sections added or removed.
+func eventChanges(noun string, before, after []Event) string {
+	key := func(e Event) string { return e.Name + "@" + clock(e.Start) }
+	keys := func(es []Event) []string {
+		out := make([]string, len(es))
+		for i, e := range es {
+			out[i] = key(e)
+		}
+		return out
+	}
+	added, removed := diffLists(keys(before), keys(after))
+	var parts []string
+	for _, k := range added {
+		name, at, _ := strings.Cut(k, "@")
+		parts = append(parts, fmt.Sprintf("added %s %s at %s", noun, name, at))
+	}
+	for _, k := range removed {
+		name, at, _ := strings.Cut(k, "@")
+		parts = append(parts, fmt.Sprintf("removed %s %s at %s", noun, name, at))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // clock renders seconds as m:ss.
 func clock(seconds float64) string {
 	s := int(math.Round(seconds))
@@ -685,6 +711,8 @@ func (st *Studio) run(ctx context.Context, category, name string, args map[strin
 		return Result{}, dialogProblem(d)
 	}
 	beforeChannels := st.channels()
+	beforeMarkers := userMarkers(st.model().Events("Mark"))
+	beforeSections := st.model().Events("Arng")
 	seq := st.model().Seq()
 	if err := st.session.Invoke(ctx, cmd.Category, cmd.Name, args); err != nil {
 		return Result{}, err
@@ -707,6 +735,12 @@ func (st *Studio) run(ctx context.Context, category, name string, args map[strin
 	}
 	changes := st.model().ChangesSince(seq)
 	effect := st.summarize(beforeChannels, changes)
+	if effect == "" {
+		effect = eventChanges("marker", beforeMarkers, userMarkers(st.model().Events("Mark")))
+		if sections := eventChanges("section", beforeSections, st.model().Events("Arng")); sections != "" {
+			effect = strings.TrimPrefix(effect+", "+sections, ", ")
+		}
+	}
 	data := map[string]any{"command": cmd, "changed": changes}
 	if effect == "" {
 		return Result{

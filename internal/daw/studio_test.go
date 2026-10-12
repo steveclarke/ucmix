@@ -260,3 +260,14 @@ func TestGetExplainsMissingChannel(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestReturnToZeroUsesTheCommand(t *testing.T) {
+	st, fake := newStudio(t)
+	if got := do(t, st, Request{Op: "transport", Action: "rtz"}); got != "Returned to the start of the song." {
+		t.Errorf("rtz = %q", got)
+	}
+	jm := fake.sentJM()
+	if jm[len(jm)-1] != `{"id": "InvokeCommand","commandCategory": "Transport","commandName": "Return to Zero"}` {
+		t.Errorf("sent %s", jm[len(jm)-1])
+	}
+}

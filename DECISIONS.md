@@ -11,8 +11,8 @@ Overnight build of `ucdaw` on branch `feat/ucdaw` (from `spike/studio-pro-ucnet-
 ```
 $ ucdawpoc discover --json
 [{"product": "Studio Pro", "version": "8.0.2.110929 macOS Arm64", "deviceClass": "DAW",
-  "identity": "<redacted>.studioapp8", "name": "Steve's MacBook Air",
-  "ip": "192.168.77.78", "controlPort": 62063}]
+  "identity": "<redacted>.studioapp8", "name": "<Mac name>",
+  "ip": "<LAN IP>", "controlPort": 62063}]
 ```
 
 ## Early protocol findings (before step 2, because they shape the design)
@@ -86,7 +86,7 @@ Played 1 s at 120 bpm, then stopped.
 $ ucdaw transport play --bars 1
 Played 1 bar at 120 bpm, then stopped.
 $ ucdaw transport rtz
-Back to the start of the song.
+Back to the start of the song.        # did nothing; see "Return to zero" below
 $ ucdaw command run Track "Add Audio Track (mono)"
 Ran Track > Add Audio Track (mono): added Track 1 (audio).
 $ ucdaw param set mixer/channel/ch1/label Guitar
@@ -170,7 +170,7 @@ Ran Edit > Undo: removed Guitar Rig 7 from Guitar.
 Ran Edit > Undo: removed Guitar.
 ```
 
-- Not testable here: Steve's own Guitar Rig "clean" preset. This MacBook has no Studio Pro user presets (`~/Documents/Studio One` holds none). If his clean sound is a Guitar Rig preset saved inside Guitar Rig rather than as a Studio Pro preset, he saves it once from Studio Pro's plug-in window preset menu; then `--preset <name>` loads it.
+- Not testable here: Steve's own Guitar Rig "clean" preset. This Mac has no Studio Pro user presets (`~/Documents/Studio One` holds none). If his clean sound is a Guitar Rig preset saved inside Guitar Rig rather than as a Studio Pro preset, he saves it once from Studio Pro's plug-in window preset menu; then `--preset <name>` loads it.
 
 ## Headline flow from a fresh `claude -p`
 
@@ -207,3 +207,12 @@ A review agent read the whole branch. Fixed, each with a test where it can be te
 - Not changed: writes in the shared `internal/transport` have no deadline (mixer code path, left alone). Studio Pro selection is exclusive (checked live), so inserting never hits other channels.
 - Live: `ucdaw transport play --for 8s` through serve, interrupted with Ctrl-C after 1.5 s: Studio Pro reported `transport/start off` straight after. (The client then printed "Error: context canceled"; it now prints "Interrupted.")
 - `golangci-lint run`: 0 issues; `just test`: 698 tests pass.
+
+## Return to zero, and final live checks
+
+- The `transport/returnToZero` button gesture did nothing: after it, Forward Bar ×2 and a marker landed at 0:12 instead of 0:04. `transport rtz` now runs Studio Pro's `Transport > Return to Zero` command. Live check: `transport rtz`, `Forward Bar` ×2, `Marker > Insert` → `markers: #2 0:04`; then Undo. Studio Pro reports no song position, so rtz is sent, not read back.
+- `command run` now reports marker and section changes: `Ran Marker > Insert: added marker #2 at 0:02.` / `Ran Edit > Undo: removed marker #2 at 0:02.`
+- Dialog auto-cancel, live: `track add --name T`, then `command run "Track > Add Insert to Selected Channels"` with no arguments →
+  `Track > Add Insert to Selected Channels opened the "Add Insert to Selected Channels" dialog, which needs choices ucdaw cannot make; canceled it.` No dialog window remained (window list checked); then Undo removed T.
+- Two Undos during the night reported no change (one while the dialog was blocking Studio Pro, one after the insert tests). In an empty song they most likely did nothing.
+- Final song state: `120 bpm, 4/4, click on, loop off, stopped; no tracks yet.` Loop range 0–2 bars remains from the loop test.

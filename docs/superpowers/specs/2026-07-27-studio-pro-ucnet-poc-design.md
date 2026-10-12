@@ -14,10 +14,10 @@ mixer state, arm recording, or expose unverified DAW controls.
 
 Studio Pro 8.1.1 is currently announcing itself over UCNET:
 
-- Host: `192.168.77.129`
+- Host: `<LAN IP>`
 - Device class: `DAW`
-- Identity: `ni5f6funpcuob3by.studioapp8`
-- Display name: `Steve's Mac mini`
+- Identity: `<redacted>.studioapp8`
+- Display name: `<Mac name>`
 - Discovery message: `DA`
 - Discovery transport: UDP
 
@@ -107,7 +107,7 @@ contact the Mac Mini, iPad, gateway, or mixer.
 
 With a safe Studio Pro session open:
 
-1. Run DAW discovery and confirm it reports `Steve's Mac mini`.
+1. Run DAW discovery and confirm it reports `<Mac name>`.
 2. Send Stop and confirm the session is stopped.
 3. Send Play and observe playback begin.
 4. Within one second, send Stop and observe playback end.

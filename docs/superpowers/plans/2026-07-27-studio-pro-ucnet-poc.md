@@ -13,7 +13,7 @@
 - This is an unpublished protocol spike under `cmd/ucdawpoc`; do not add DAW commands to the published `ucmix` command.
 - Do not change mixer state or the existing mixer connection handshake.
 - Support only `transport/start` and `transport/stop`; do not add Record, arm, save, quit, locate, track, fader, plug-in, marker, or session commands.
-- Discover the endpoint from its live `DA` announcement; do not hard-code `192.168.77.129`, UDP source port `62807`, or TCP control port `49601`.
+- Discover the endpoint from its live `DA` announcement; do not hard-code `<LAN IP>`, UDP source port `62807`, or TCP control port `49601`.
 - Accept only device class `DAW` with an identity ending in `.studioapp8`.
 - Reject zero or multiple matching Studio Pro endpoints.
 - Send Stop before the live Play test.

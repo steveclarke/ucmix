@@ -77,3 +77,14 @@ func TestSongListsSectionsAndMarkers(t *testing.T) {
 		t.Errorf("song = %q", got)
 	}
 }
+
+func TestEventChanges(t *testing.T) {
+	before := []Event{{Name: "#2", Start: 4}}
+	after := []Event{{Name: "#2", Start: 4}, {Name: "#3", Start: 8}}
+	if got := eventChanges("marker", before, after); got != "added marker #3 at 0:08" {
+		t.Errorf("got %q", got)
+	}
+	if got := eventChanges("marker", after, before); got != "removed marker #3 at 0:08" {
+		t.Errorf("got %q", got)
+	}
+}
