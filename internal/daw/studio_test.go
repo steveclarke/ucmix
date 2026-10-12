@@ -256,7 +256,7 @@ func TestGetExplainsMissingChannel(t *testing.T) {
 	st, _ := newStudio(t)
 	_, err := st.Do(context.Background(), Request{Op: "get", Path: "mixer/channel/ch3/volume"})
 	var p Problem
-	if !errors.As(err, &p) || p.Sentence() != "There is no track 3; the song has 0." {
+	if !errors.As(err, &p) || p.Sentence() != "There is no track 3; the song has none." {
 		t.Errorf("err = %v", err)
 	}
 }

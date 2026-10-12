@@ -357,7 +357,7 @@ func (st *Studio) missingChannel(path string) error {
 		noun = parts[1]
 	}
 	return Problem{
-		Message: fmt.Sprintf("there is no %s %d; the song has %d", noun, n, have),
+		Message: fmt.Sprintf("there is no %s %d; the song has %s", noun, n, map[bool]string{true: "none", false: strconv.Itoa(have)}[have == 0]),
 		Hint:    "get_song or `ucdaw state` lists the channels",
 	}
 }
