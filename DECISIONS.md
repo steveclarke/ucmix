@@ -371,3 +371,4 @@ SAY  Everything is set up except the clean guitar sound. Guitar Rig 7 is on the 
 ```
 
 - Run 2's result is left in the throwaway song for Steve to see. The "Mojito" instrument and a "Bridge" marker at bar 1 in that song are leftovers of the night's tests.
+- After the scene, `fader Pad --down 3` then `Edit / Undo`: Undo reported no change and the fader stayed at −3 dB (round 1 saw a fader change undone). Some Undo presses act on steps the remote cannot see (selection, arm), so "undo that" after a fader move is not reliable; setting the old level back is. Open question, logged.

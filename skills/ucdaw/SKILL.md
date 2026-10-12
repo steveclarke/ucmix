@@ -1,6 +1,6 @@
 ---
 name: ucdaw
-description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to play, stop, loop, set the click or tempo, add a track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, rename/mute/solo/fader a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
+description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to play, stop, loop, set the click or tempo, add an audio or instrument track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, edit the arrangement (add, repeat, move, delete, rename sections), edit audio (fade, split, trim, crossfade, quantize), set a fader in dB, remember a favorite sound, rename/mute/solo a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
 ---
 
 # ucdaw — Studio Pro over UCNET
@@ -38,10 +38,58 @@ ucdaw transport loop on|off          # needs a loop range in the song
 ucdaw click on|off                   # metronome
 ucdaw tempo 96                       # bpm; `ucdaw tempo` reads it
 ucdaw track add mono --name Guitar   # mono or stereo audio track
+ucdaw track add --name Guitar --insert "my clean guitar"   # with a plug-in or favorite
 ucdaw insert Guitar "Guitar Rig 7" --preset Clean
+ucdaw instrument add "Syntronik 2" --name Pad [--preset P]  # instrument track, preset read back
+ucdaw fader Pad -6 | --down 3 | --up 2                      # dB, on Studio Pro's own curve
 ucdaw plugins rig                    # installed effects and instruments
+ucdaw presets "Pro EQ" [filter]      # a plug-in's Studio Pro presets
 ucdaw state                          # song summary; `ucdaw state mixer/channel/ch1` for every value
 ```
+
+## Arrangement (arranger sections)
+
+```bash
+ucdaw section                         # Verse bar 1 (8 bars), Chorus bar 9 …
+ucdaw section add Verse Chorus Bridge [--bars 8]   # appended at the end
+ucdaw section repeat Chorus after Bridge           # "repeat chorus one after the bridge"
+ucdaw section duplicate Chorus                     # copy right after itself
+ucdaw section move Bridge before "Chorus 2"        # two undo steps
+ucdaw section delete Bridge                        # gap closes
+ucdaw section rename 1 Intro
+ucdaw section play Chorus --bars 4                 # "play from the chorus"
+```
+
+Sections are named by name, number, or name and occurrence ("Chorus 2",
+"second chorus", "last chorus"). Everything in a section's time moves with
+it. Each edit is confirmed from the arranger list Studio Pro sends back.
+
+## Audio edits
+
+```bash
+ucdaw audio fade-out Guitar [--bars 1]   # "crossfade the end of the take"
+ucdaw audio fade-in Guitar
+ucdaw audio split Guitar 9               # at bar 9
+ucdaw audio trim-end Guitar 17
+ucdaw audio crossfade Guitar [--ms 10]
+ucdaw audio quantize Guitar
+```
+
+They act on every event of the track. Studio Pro does not report audio events
+to remote apps, so these are sent but not read back, and the answer says so.
+
+## Favorites
+
+```bash
+ucdaw favorite set "clean guitar" "Guitar Rig 7" --preset Clean
+ucdaw favorite set "worship synth" "Syntronik 2"
+ucdaw favorite list | remove <name>
+```
+
+`insert`, `track add --insert` and `instrument add` take a favorite wherever
+they take a plug-in ("my clean guitar" works). A preset must be a Studio Pro
+preset: a sound saved only in Guitar Rig's own browser has to be saved once
+from the preset menu at the top of the plug-in window in Studio Pro.
 
 ## Anything else: Studio Pro's own commands
 
@@ -53,6 +101,7 @@ ucdaw command list undo
 ucdaw command run "Edit > Undo"
 ucdaw command run Track "Add Audio Track (stereo)"
 ucdaw command run "Zoom > Zoom Full"
+ucdaw command run Transport "Forward Bar" --arg Bars=4   # arguments, as macros carry them
 ```
 
 ucdaw reports what changed ("removed Guitar Rig 7 from Guitar"). View and
@@ -71,25 +120,27 @@ by `ucdaw params [filter]`, one line per pattern (`mixer/channel/ch<n>/mute`).
 ucdaw param get mixer/channel/ch1/volume
 ucdaw param set mixer/channel/ch1/mute on
 ucdaw param set mixer/channel/ch1/label "Lead Vox"
-ucdaw param set mixer/channel/ch1/volume 60      # fader travel, 0–100
+ucdaw param set mixer/channel/ch1/volume -6      # dB; "60%" sets fader travel
 ```
 
 Values are in the parameter's own units: on/off for switches, bpm for tempo,
-list entries by name. Fader volume is fader travel in percent; Studio Pro does
-not publish its dB curve.
+dB for faders, sends and cue mixes, list entries by name.
 
 ## MCP tools (`studio-pro-ucnet`)
 
-`transport`, `click`, `tempo`, `get_song`, `get_values`, `get_param`,
-`set_param`, `list_params`, `add_track`, `add_insert`, `list_plugins`,
-`list_commands`, `run_command`. Start with `get_song`. Undo is
-`run_command` Edit / Undo.
+`get_song`, `transport`, `click`, `tempo`, `add_track`, `add_insert`,
+`add_instrument`, `section`, `audio_edit`, `fader`, `favorite`,
+`list_plugins`, `list_presets`, `get_values`, `get_param`, `set_param`,
+`list_params`, `list_commands`, `run_command` (with `args`). Start with
+`get_song`. Undo is `run_command` Edit / Undo.
 
 ## Rules
 
 - Never save, record, arm, open, close or switch songs, or quit Studio Pro,
   unless the musician asks for exactly that.
-- After a test that changes the song, undo it.
+- After a test that changes the song, undo it. Tempo is not in Studio Pro's
+  undo history; set it back. A fader move is not reliably undone either; set
+  the old level back.
 - Plug-in presets are Studio Pro presets, named relative to the plug-in's
   preset folder: `Misc/50 Hz Removal`. A preset that is not found leaves the
   plug-in on default settings and the answer says so.

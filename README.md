@@ -240,22 +240,34 @@ from Studio Pro's own updates, and runs any of Studio Pro's own commands.
 
 ```console
 $ ucdaw serve &                       # optional: holds one session, ~40 ms answers
-$ ucdaw state
-120 bpm, 4/4, click on, loop off, stopped; no tracks yet.
-$ ucdaw track add mono --name Guitar
-Added mono audio track Guitar.
-$ ucdaw insert Guitar "Guitar Rig 7"
-Added Guitar Rig 7 to Guitar (insert 1).
-$ ucdaw transport play --bars 4
-Played 4 bars at 120 bpm, then stopped.
-$ ucdaw command run "Edit > Undo"
-Ran Edit > Undo: removed Guitar Rig 7 from Guitar.
+$ ucdaw tempo 72
+Tempo 72 bpm (was 120).
+$ ucdaw track add --name Guitar --insert "Guitar Rig 7"
+Added mono audio track Guitar; added Guitar Rig 7 to Guitar (insert 1).
+$ ucdaw instrument add "Syntronik 2" --name Pad
+Added instrument track Pad with Syntronik 2.
+$ ucdaw section add Verse Chorus Bridge
+Added sections Verse, Chorus and Bridge, 8 bars each; sections now: Verse bar 1, Chorus bar 9, Bridge bar 17.
+$ ucdaw section repeat Chorus after Bridge
+Repeated Chorus after Bridge, at bar 25.
+$ ucdaw fader Pad --down 3
+Pad at -3 dB (was 0 dB).
+$ ucdaw fader Pad 0
+Pad at 0 dB (was -3 dB).
 ```
 
 Commands: `discover`, `state [prefix]`, `state record <file>`,
 `transport play|stop|rtz|loop`, `click`, `tempo`, `track add`, `insert`,
-`plugins`, `param get|set`, `params`, `command list|run`, `serve`, `mcp`.
+`instrument add`, `section list|add|duplicate|repeat|move|delete|rename|goto|play`,
+`audio fade-out|fade-in|split|trim-start|trim-end|crossfade|quantize`,
+`fader`, `favorite set|list|remove`, `plugins`, `presets`, `param get|set`,
+`params`, `command list|run [--arg name=value]`, `serve`, `mcp`.
 Every command takes `--json`.
+
+Faders read and take dB on Studio Pro's own fader curve (measured against its
+console). Audio edits are sent but not read back: Studio Pro does not report
+audio events to remote apps. Favorites (`favorite set "clean guitar" "Guitar Rig 7"
+--preset Clean`) are kept in the user config folder, readable only by the user.
 
 For Claude Code:
 
