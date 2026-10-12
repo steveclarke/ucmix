@@ -1,6 +1,6 @@
 ---
 name: ucdaw
-description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to play, stop, loop, set the click or tempo, import audio files or a folder of stems (assemble a mix from stems), add an audio or instrument track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, edit the arrangement (add, repeat, move, delete, rename sections), edit audio (fade, split, trim, crossfade, quantize), set a fader in dB, remember a favorite sound, rename/mute/solo a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
+description: Drive Fender Studio Pro 8 (formerly Studio One) over UCNET, the Studio Pro Remote app's protocol. Trigger when the user asks to start a new song, play, stop, loop, set the click or tempo, import audio files or a folder of stems (assemble a mix from stems), add an audio or instrument track, put a plug-in (Guitar Rig, Pro EQ…) on a track with a preset, edit the arrangement (add, repeat, move, delete, rename sections), edit audio (fade, split, trim, crossfade, quantize), set a fader in dB, remember a favorite sound, rename/mute/solo a channel, undo, run any Studio Pro menu or key command, or read what is in the open song — or mentions ucdaw, Studio Pro, Studio One, or the studio-pro-ucnet MCP tools.
 ---
 
 # ucdaw — Studio Pro over UCNET
@@ -31,6 +31,7 @@ Remote service on. Keep `ucdaw serve` running in a terminal for instant answers.
 ## Musician-level commands
 
 ```bash
+ucdaw song new --tempo 72 --click on # new empty song; the open one stays in its tab
 ucdaw transport play --bars 4        # play 4 bars, then stop
 ucdaw transport play --for 2s        # play 2 seconds, then stop
 ucdaw transport play | stop | rtz    # plain play keeps going until stop
@@ -46,6 +47,22 @@ ucdaw plugins rig                    # installed effects and instruments
 ucdaw presets "Pro EQ" [filter]      # a plug-in's Studio Pro presets
 ucdaw state                          # song summary; `ucdaw state mixer/channel/ch1` for every value
 ```
+
+## Starting a new song
+
+```bash
+ucdaw song new                        # the New window's current template and settings
+ucdaw song new --tempo 72 --click on  # "a new song at 72 with the click on"
+```
+
+Runs File > New, presses OK in Studio Pro's New window (found by its label),
+waits until Studio Pro reports the new song's name (the date and the user's name,
+"(2)" for a second one that day), then sets tempo and click and reads them back:
+"Started a new song (2026-10-12 Stephen Clarke) at 72 bpm, click on." The song
+that was open stays open in its own tab; nothing is saved or closed. serve
+follows the new song without reconnecting. If Studio Pro shows any other window
+instead, ucdaw cancels it and says so. `command run "File > New Session"` only
+cancels the New window and points here.
 
 ## Arrangement (arranger sections)
 
@@ -134,8 +151,8 @@ ucdaw reports what changed ("removed Guitar Rig 7 from Guitar"). View and
 editing commands change nothing Studio Pro reports; the answer says so.
 Commands act on the current selection, like their menu items.
 
-If a command opens a dialog (it needs choices), ucdaw cancels the dialog at
-once and says so, so Studio Pro is never left blocked.
+If a command opens a dialog (it needs choices), ucdaw presses its Cancel
+button at once and says so, so Studio Pro is never left blocked.
 
 ## Parameters by path
 
@@ -154,7 +171,7 @@ dB for faders, sends and cue mixes, list entries by name.
 
 ## MCP tools (`studio-pro-ucnet`)
 
-`get_song`, `transport`, `click`, `tempo`, `add_track`, `add_insert`,
+`get_song`, `new_song` (tempo, click), `transport`, `click`, `tempo`, `add_track`, `add_insert`,
 `add_instrument`, `import_audio`, `section`, `audio_edit`, `fader`, `favorite`,
 `list_plugins`, `list_presets`, `get_values`, `get_param`, `set_param`,
 `list_params`, `list_commands`, `run_command` (with `args`). Start with
@@ -163,7 +180,8 @@ dB for faders, sends and cue mixes, list entries by name.
 ## Rules
 
 - Never save, record, arm, open, close or switch songs, or quit Studio Pro,
-  unless the musician asks for exactly that.
+  unless the musician asks for exactly that. Start a new song (`song new`,
+  `new_song`) only when they ask for one.
 - After a test that changes the song, undo it. Tempo is not in Studio Pro's
   undo history; set it back. A fader move is not reliably undone either; set
   the old level back.

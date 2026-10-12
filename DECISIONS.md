@@ -437,3 +437,37 @@ $ ucdaw state
 - **`--onto` and `--at`, live:** `ucdaw import "Small Shaker.wav" --onto "Probe a" --at 3` → `Imported Small Shaker.wav onto Probe a at bar 3. …`; on screen the clip starts on the bar-3 line of Probe a and keeps its file name. One Undo removes it.
 - All these test tracks were undone (channel count read back 14 → 11); the four stems from the main test stay.
 - Playback was running when I took the last window capture (position 1.3.2, about 2 s in); `ucdaw` had not sent Play (the commands just before were eight Undos, a parameter read, Return to Zero and `state`, which reported stopped). Stopped it at once; `transport/start: off` read back. Return to Zero alone, tried again, did not start playback. Cause unknown; possibly Steve at the screen.
+
+# Starting a new song (2026-10-12, from 09:30 NDT)
+
+## What carries it
+
+- `InvokeCommand File / New Session` opens Studio Pro's New window and announces it as `BeginDialog` titled "New", buttons **OK, Cancel** (OK first; the Add Insert dialog lists Cancel first). `ConfirmDialog` with OK's index creates the song with the window's current template and settings; `document/title` changes to the new name. The session and serve follow the new song with no reconnect; the previous song stays open in its own tab.
+- `ucdaw song new [--tempo BPM] [--click on|off]` and MCP `new_song` (`tempo`, `click`): refuse if a dialog is already open; Invoke; wait up to 5 s for a dialog; press the button labeled OK only if the dialog is titled "New"; wait up to 20 s for `document/title` to change; let the new song's own values settle (otherwise its default tempo can land on top of the one ucdaw sets); then set tempo and click through the usual read-back paths and report `st.Song()`.
+- An unconfirmed `EndDialog` after OK is not a failure (a song can take more than AnswerDialog's 2 s to load); the title change is the proof. No title change in 20 s is reported plainly, and tempo and click are then left alone, so they never land on the old song.
+- A different dialog (title not "New", or no OK button) is cancelled and reported; nothing else is pressed.
+
+## Auto-cancel and the New window
+
+- Every other command cancels a dialog it opens (`run`, track, insert, instrument, audio, import). `song new` calls `Session.Invoke` directly, not `run`, so that path never sees the New window. Nothing in serve, MCP or the CLI cancels dialogs on its own; serve runs one request at a time, so no other request can cancel it mid-command.
+- **Bug found on the way:** `DismissDialog` pressed button 0, "Cancel in every dialog seen so far". In the New window button 0 is OK, so `command run "File > New Session"` would have *started* a song while reporting it cancelled the window. `DismissDialog` now presses the button labeled Cancel (button 0 only when there is none), and `command run "File > New Session"` cancels the window and points at `ucdaw song new`.
+
+## Live test (09:35 NDT, serve restarted with the new build, `--host 192.168.77.78`)
+
+```
+$ ucdaw state --json   -> document "2026-10-12 Stephen Clarke", 120 bpm, click on, 1 channel
+$ ucdaw song new --tempo 72 --click on                (1.9 s wall)
+Started a new song (2026-10-12 Stephen Clarke(2)) at 72 bpm, click on.
+$ ucdaw state
+72 bpm, 4/4, click on, loop off, stopped; no tracks yet.
+$ ucdaw --direct --host 192.168.77.78 state document  (a fresh session, not serve's model)
+  document/title   "2026-10-12 Stephen Clarke(2)"
+$ ucdaw command run "File > New Session"
+File > New Session opened the "New" dialog, which needs choices ucdaw cannot make; canceled it.
+  start a new song with: ucdaw song new (MCP new_song)
+$ ucdaw state --json   -> still "2026-10-12 Stephen Clarke(2)", 72 bpm (no third song)
+```
+
+- A second new song on the same day is named with "(2)" appended, so the title always changes.
+- Left as is: the new song "2026-10-12 Stephen Clarke(2)" (unsaved, 72 bpm, click on) is the front tab; "2026-10-12 Stephen Clarke" stays open in its tab. Nothing saved or closed.
+- `just test`: 780 tests pass; `golangci-lint`: 0 issues on the ucdaw packages.

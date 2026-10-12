@@ -240,8 +240,8 @@ from Studio Pro's own updates, and runs any of Studio Pro's own commands.
 
 ```console
 $ ucdaw serve &                       # optional: holds one session, ~40 ms answers
-$ ucdaw tempo 72
-Tempo 72 bpm (was 120).
+$ ucdaw song new --tempo 72 --click on
+Started a new song (2026-10-12 Stephen Clarke(2)) at 72 bpm, click on.
 $ ucdaw track add --name Guitar --insert "Guitar Rig 7"
 Added mono audio track Guitar; added Guitar Rig 7 to Guitar (insert 1).
 $ ucdaw instrument add "Syntronik 2" --name Pad
@@ -258,7 +258,7 @@ $ ucdaw import ~/Music/stems
 Imported 4 stems onto new tracks at bar 1: Kick (mono), Bass DI (stereo), Pad (stereo) and Lead Vox (mono). Skipped notes.txt (not audio). Tracks read back; Studio Pro does not report clips to remotes, so placement is not read back (Studio Pro drew each file's waveform, so it read every file).
 ```
 
-Commands: `discover`, `state [prefix]`, `state record <file>`,
+Commands: `discover`, `state [prefix]`, `state record <file>`, `song new [--tempo bpm] [--click on|off]`,
 `transport play|stop|rtz|loop`, `click`, `tempo`, `track add`, `insert`,
 `instrument add`, `section list|add|duplicate|repeat|move|delete|rename|goto|play`,
 `audio fade-out|fade-in|split|trim-start|trim-end|crossfade|quantize`,
@@ -266,7 +266,9 @@ Commands: `discover`, `state [prefix]`, `state record <file>`,
 `params`, `command list|run [--arg name=value]`, `serve`, `mcp`.
 Every command takes `--json`.
 
-Faders read and take dB on Studio Pro's own fader curve (measured against its
+`song new` runs File > New and presses OK in Studio Pro's New window (matched by
+its label), so the song gets that window's current template; the open song stays
+open in its own tab and nothing is saved. Faders read and take dB on Studio Pro's own fader curve (measured against its
 console). Audio edits are sent but not read back: Studio Pro does not report
 audio events to remote apps. `import` puts each WAV or AIFF stem on its own new
 mono or stereo track at bar 1, named from the file ("01_Kick_Final.wav" is Kick),
