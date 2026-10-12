@@ -521,3 +521,49 @@ Steve's first real trial (remixing "The King Has Come" stems) showed what helps 
 - MCP over stdio (`ucdaw mcp`): `analyze_audio {tracks: [Bass]}` and `trim {track: Bass}` answered as the CLI does.
 - Left as is: the test song "(4)" is the front tab, unsaved; Steve's remix "(3)" is in the previous tab, untouched. Nothing saved or closed; playback not started.
 - `just test`: all pass; `golangci-lint`: 0 issues on the ucdaw packages.
+
+# Pre-merge review fixes (2026-10-12, PR #39)
+
+Eight findings from the pre-merge review, each fixed test first. No live run against Studio Pro: every case is reproduced with the in-memory fake Studio Pro.
+
+## 1. MCP tool calls run one at a time
+
+- The go-sdk runs tool calls concurrently. Without `ucdaw serve` nothing serialized them, so selection-based edits (add track then rename the selected one, insert, instrument, audio edits, sections) could interleave and act on the wrong track.
+- One process-wide lock in `dawmcp.run` wraps every request. `daw.Request.Exclusive` is the single rule, shared with serve's work lock: everything is exclusive except transport stop, which must never wait behind a timed play.
+- Tests: `TestToolCallsReachStudioProOneAtATime`, `TestStopDoesNotWaitBehindAPlay`.
+
+## 2. Dismissing a dialog never chooses for the musician
+
+- `DismissDialog` pressed button 0 when there was no Cancel and reported "canceled". It now presses only a button whose label declines (Cancel, then No, then Don't… / Do Not…, whole words, case-insensitive, typographic apostrophe folded), or the only button of a one-button alert. "Don't Save" is not a decline: it closes without saving and loses work.
+- With no such button it presses nothing and returns a Problem naming the dialog and its buttons, hint "answer it in Studio Pro". It returns the label it pressed.
+- Every caller (`run`, insert, instrument, audio edits, new song, import) goes through `Studio.dismiss` and says what really happened: `closed it with "Cancel"`, or left open with the buttons named.
+- Tests: `TestDismissDialogPressesOnlyADecliningButton`, `TestDialogCallersLeaveAChoiceOpenAndSaySo` (all six callers), `TestDialogCallersNameTheButtonThatClosedIt`.
+
+## 3. Import never answers "Don't Convert"
+
+- The conversion answer took the last label containing a positive word, so "Don't Convert" (or "Don’t Convert") could win. Labels that turn the offer down (cancel, no, don't, do not, without, never, skip, as whole words) are skipped and the first positive one (convert, ok, yes, import, apply, continue) is taken.
+- Test: `TestImportAcceptsAConversionAndCancelsAnythingElse` (Don't / Don’t / Do Not / Without / No in either slot).
+
+## 4. A timed play presses Stop only if it is still playing
+
+- Timed play slept and always pressed Stop, stopping a musician who had stopped and restarted playback meanwhile. It now waits on `transport/start` with the deadline and returns as soon as playback stops or restarts elsewhere (any change to `transport/start` after playback began), answering "Playback was stopped elsewhere before the 4 bars were up, so ucdaw did not press Stop." Stop is pressed only if still playing at the deadline. A client hang-up still stops playback (`WithoutCancel`).
+- Tests: `TestTimedPlayLeavesAStopAndRestartAlone`, `TestTimedPlayStopsAtTheDeadline`, `TestTimedPlayStopsWhenTheClientHangsUp`.
+
+## 5. Play and import lengths checked as floats
+
+- Seconds and bars were converted to `time.Duration` before the `MaxPlay` check. On amd64 1e300 or +Inf overflows to a negative Duration that passes the check and plays untimed; on arm64 it saturates and the message read "2562047h47m17s is longer…". The length is now compared as a float first (NaN, negatives and -Inf rejected), and a huge length reads "that is longer than the 1m0s limit". The import landing wait (`landingTimeout`, from a header's frame count) is capped the same way.
+- Tests: `TestPlayRejectsLengthsThatOverflow` (+Inf, 1e300, 1e19, 60.5 s, -Inf, NaN, -1; seconds, bars and section play), `TestLandingTimeoutCapsHugeHeaders`.
+
+## 6. Arranger edits confirmed by the whole list
+
+- Delete waited for the count only, so a wrong section removed read as success; move deleted the original after checking only the count of the paste. Every arranger edit (duplicate, repeat/copy, move, delete, rename, add) now waits for the exact list it expects, names and starts, and otherwise reports what Studio Pro shows against what was expected. Move checks the pasted copy (source name at the destination, later sections shifted) before deleting the original, so a bad paste never costs the original.
+- Tests: `TestSectionDeleteChecksTheWholeList`, `TestSectionMoveChecksTheWholeList`, `TestSectionMoveKeepsTheOriginalWhenTheCopyIsWrong`, `TestSectionCopyAndDuplicateCheckTheWholeList`, `TestSectionRenameChecksTheWholeList`.
+
+## 7. Dialog button slots stay positional
+
+- An unlabeled first button was dropped, moving the second into slot 0, so the `dialogResult` sent pressed the wrong button. Slots now stay in place (an empty label kept as ""); only trailing empty slots go. Matching skips empty labels; "one-button alert" counts labeled buttons.
+- Test: `TestDialogButtonsKeepTheirSlots`, plus the `["", "Cancel"]` case in finding 2's test.
+
+## 8. Spike scaffolding removed
+
+- `docs/superpowers/plans/2026-07-27-studio-pro-ucnet-poc.md` and `docs/superpowers/specs/2026-07-27-studio-pro-ucnet-poc-design.md` described the `ucdawpoc` proof that `ucdaw` superseded. Their protocol findings were already in Hugo `knowledge/ucnet-studio-pro/protocol.md` and this log; the one thing missing there, how the traffic was captured (`rvictl` remote virtual interface on the iPad), was added to Hugo first. Both files removed.
