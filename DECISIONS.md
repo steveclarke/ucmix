@@ -221,9 +221,9 @@ A review agent read the whole branch. Fixed, each with a test where it can be te
 
 ## Reconnect: skipped on Steve's instruction
 
-- Change from Steve via the coordinator (01:05 NDT): skip step 5 entirely. Studio Pro is not quit, relaunched or restarted tonight, and nothing is done that could disconnect it. Reconnect stays as written in round 1 and is listed in the hand-back note as "to test with Steve".
+- Change from Steve via the coordinator (about 01:00 NDT): skip step 5 entirely. Studio Pro is not quit, relaunched or restarted tonight, and nothing is done that could disconnect it. Reconnect stays as written in round 1 and is listed in the hand-back note as "to test with Steve".
 
-## Step 1: arrangement edits (01:05–01:40 NDT)
+## Step 1: arrangement edits
 
 Route 1 (Studio Pro's own commands with `commandArgs`) worked; routes 2–4 (InvokeMethod, macros) were not needed.
 
@@ -236,7 +236,7 @@ Route 1 (Studio Pro's own commands with `commandArgs`) worked; routes 2–4 (Inv
   - move: copy + paste at the target, then Delete Range on the original. Two undo steps; the answer says so.
   - rename: Goto n, `Event / Rename Events {"New Name": name}`. Without arguments it opens the Rename dialog (auto-cancelled); with a wrong argument name it renames to "" (seen live with `Name`, `Text`, `Title`…, each undone).
   - add: Return to Zero + Forward Bar to the end of the last section, `Edit / Create Range from Cursor`, Forward Bar {bars}, `Edit / Range End to Cursor`, `Arranger / Add Arranger Section from Selection`; Studio Pro auto-names it ("Intro", "Verse"), then ucdaw renames it. Works in a song with no sections at all.
-- Live run (serve, 01:35 NDT):
+- Live run (serve):
 
 ```
 $ ucdaw section
@@ -262,7 +262,7 @@ Repeated Chorus after Bridge, at bar 17; the rest moved 8 bars later.
 - `command run` gained `--arg name=value` and MCP `run_command` an `args` object, since arguments turned out to be the key to most commands.
 - Blocked by the auto-mode classifier (not retried): `Edit / Select All` + `Edit / Delete` to clear the test arrangement. The blank-arrangement case was reached with Undo instead.
 
-## Step 2: audio events and edits (01:45–02:25 NDT)
+## Step 2: audio events and edits
 
 - **Audio without a microphone or a file dialog.** Recording would capture Steve's room and Import File risks a native file panel ucdaw cannot cancel, so the test take was made inside Studio Pro: `Track / Add Instrument and Track {mode: 1, cid: <Mojito>, preset: default, openEditor: 0}` (no editor window opened), `Instrument Parts / Insert Instrument Part` (one bar at the cursor, from `Insert Part.js`), `Musical Functions / Fill with Notes {…}` (arguments from the factory macros), `Event / Bounce Selection {Snap: 0}` → a new stereo audio track with the rendered take. Renamed it "Take", duplicated the event to four bars and bounced again into one 4-bar event.
 - **Studio Pro does not send audio events to remotes.** A capture (`state record`) during the bounce shows only the new channel's `PV`/`PS`/`PC` values and the focus change: no `BO` kind, no `ZM` message for events. Event lists are only markers, arranger, chords and lyrics. So audio edits are sent and answered "not read back"; ucdaw says so in every answer rather than claiming a confirmation it does not have.
@@ -276,7 +276,7 @@ Repeated Chorus after Bridge, at bar 17; the rest moved 8 bars later.
   - quantize: `Event / Quantize`.
 - "Crossfade the end of the guitar take" reads as a fade-out of the end; the MCP description says so.
 - **Arrangement edits carry the audio.** `section duplicate Verse` copied the Mojito part and the take into the new Verse at bar 9 (checked on screen), then undone.
-- Live run (serve, 02:20 NDT):
+- Live run (serve):
 
 ```
 $ ucdaw audio fade-out Take            (run earlier as raw commands)
@@ -292,14 +292,14 @@ $ ucdaw audio quantize Take
 Quantized Take to the quantize grid. …
 ```
 
-## Step 3: favorites and instrument tracks (02:25–03:00 NDT)
+## Step 3: favorites and instrument tracks
 
 - **Instrument tracks.** Studio Pro's `audioedit.package` script (`Insert FX.js`) has `Track / Add Instrument and Track`: it reads `mode`, `cid`, `preset` and `openEditor` from its arguments, makes a new instrument track, loads the instrument and connects it. `openEditor: "0"` keeps the instrument window closed (window list checked after every add). Live: Mojito, Syntronik 2 and MODO BASS 2 each added in 0.4–1.5 s.
 - The remote shows an instrument track as its instrument's channel (`type AudioSynth`, label = instrument name). Renaming that channel (`PS label`) renames the track too (seen on screen: track header "Pad").
 - **Instrument preset readback.** Studio Pro reports `surface/focusPresetName` only for the device in focus. `Console / Show Instrument Editor` toggles the selected instrument's window: ucdaw opens it, reads the preset, and closes it again (a moment on screen), and only when a preset was asked for and no other editor is in focus. Live: Mojito with preset `Transformator` read back as "Transformator"; with `LuvErasor` → "(preset LuvErasor)". VSTs that report no preset name fall back to checking the preset file.
 - **Preset files.** Studio Pro presets live in `~/Documents/Studio One/Presets/<vendor>/<plug-in>/` (user; empty on this Mac) and `Studio Pro 8.app/Contents/Presets/<vendor>/<plug-in>/` (factory). `favorite set` warns when the named preset file does not exist yet, so Steve knows to save it from the plug-in window first.
 - **Favorites** (`internal/dawfav`): `~/Library/Application Support/ucdaw/favorites.json`, 0600 in a 0700 directory, written atomically, at most 500 entries and 1 MB, control characters stripped. Matching ignores case, punctuation and the words "my", "the", "preset", "sound", "usual", so "my clean preset" finds "clean", and a unique partial match ("clean" → "clean guitar") works. `insert`, `track add --insert` and `instrument add` resolve favorites; an explicit `--preset` overrides the favorite's. Spelling is US ("favorite") because the repo's linter enforces it.
-- Live run (serve, 02:55 NDT; the test favorites were removed afterwards, so Steve's file is empty):
+- Live run (serve; the test favorites were removed afterwards, so Steve's file is empty):
 
 ```
 $ ucdaw favorite set "pad" Mojito --preset LuvErasor
@@ -322,7 +322,7 @@ Added Guitar Rig 7 to Gtr (insert 2); Studio Pro has no preset "Clean" for it, s
 - **Known glitch (round 1 code):** Undo reports while removing several renamed channels in a row named the wrong channel twice ("removed Guitar Rig 7 from X" for Gtr). The song itself was right. Cause: channels renumber as one is removed and the label updates arrive across the settle window. Logged, not fixed tonight.
 - An arranger duplicate with content once needed two Undo presses: the first reported no change, the second reverted the sections and content.
 
-## Step 4: faders in dB (03:00–03:25 NDT)
+## Step 4: faders in dB (done by 01:28 NDT)
 
 - `fadercurve` is not in any file Studio Pro ships (it lives in the binaries), so it was measured: the console (`View / Console`) shows each fader's level as text, and ucdaw set `mixer/channel/ch2/volume` to 36 wire positions and read Studio Pro's text from a capture of its window after each.
 - Result: straight lines in dB between (0.04, −60), (0.16, −40), (0.52, −10), (0.76, 0) and (1.0, +10); below 0.04 the same line continues at 2100 dB per unit (−139.8 at 0.002), and 0 is −inf. Every measured point matches to within 0.05 dB (the console's rounding). +10 dB = gain 3.1622, the top of the published range, which confirms the scale.
@@ -334,7 +334,7 @@ dB   +10  +7.9 +5.8 +3.7 +1.7  0  -2.5 -4.6 -6.7 -8.8 -9.6 -10 -10.8 -11.7 -15.8
 
 - Shipped: every `fadercurve` parameter (channel volume, send and cue-mix levels) now reads and takes dB (`param set …/volume -6`, "60%" still sets travel); `ucdaw fader <track> [dB] [--up N|--down N]`; MCP `fader` (`change: -3` for "bring the pad down 3 dB"); `get_song` lists a track's level when it is not 0 dB, and "muted".
 - `fader` reads its own arguments because cobra takes "-6" for a flag.
-- Live check against the console (03:20 NDT), ucdaw's answer then the console's text:
+- Live check against the console, ucdaw's answer then the console's text:
 
 ```
 $ ucdaw fader Take -6          Take at -6 dB (was 0 dB).        console: -6.0
