@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hand-written fixture in the shape of Studio Pro's dawremote.xml. Not Fender's file. -->
+<uc:ComponentModel xmlns:uc="http://www.presonus.com/xml/uc" namespace="Test">
+	<uc:Definitions>
+		<uc:Range id="Tempo" min="10" max="400" def="120" units="bpm.value"/>
+		<uc:Range id="Volume" min="0" max="3.1622" def="1" curve="fadercurve" units="gain.db.value"/>
+		<uc:Range id="Num" min="1" max="32" def="4"/>
+		<uc:StringList id="Denom">
+			<uc:String text="2"/>
+			<uc:String text="4"/>
+			<uc:String text="8"/>
+		</uc:StringList>
+	</uc:Definitions>
+	<uc:Parameters>
+		<uc:ParamList id="Transport">
+			<uc:Param id="start" name="Start"/>
+			<uc:Param id="primaryTime" type="string" flags="private"/>
+			<uc:Param id="tempo" type="float" range="Tempo" name="Tempo"/>
+			<uc:Param id="timeSignatureNum" type="int" range="Num"/>
+			<uc:Param id="timeSignatureDenom" type="list" units="Denom"/>
+		</uc:ParamList>
+		<uc:ParamList id="Group">
+			<uc:Param id="count" type="int" max="1000" flags="readonly"/>
+		</uc:ParamList>
+		<uc:ParamList id="ChannelGroup" inherit="Group"/>
+		<uc:ParamList id="Channel">
+			<uc:Param id="label" type="string" name="Title"/>
+			<uc:Param id="volume" type="float" range="Volume" name="Volume"/>
+			<uc:Param id="gain" type="float" min="0" max="1.5"/>
+		</uc:ParamList>
+		<uc:ParamList id="InsertSlot">
+			<uc:Param id="deviceName" type="string" flags="readonly"/>
+		</uc:ParamList>
+		<uc:ParamList id="Document">
+			<uc:Param id="title" type="string" flags="readonly"/>
+		</uc:ParamList>
+	</uc:Parameters>
+	<uc:Templates>
+		<uc:Template id="Inserts">
+			<uc:foreach id="$i" min="1" max="2">
+				<uc:Component id="slot$i" paramlist="InsertSlot"/>
+			</uc:foreach>
+		</uc:Template>
+		<uc:Template id="Base">
+			<uc:Component id="inserts" template="Inserts" paramlist="Group"/>
+		</uc:Template>
+		<uc:Template id="Strip" inherit="Base">
+			<uc:Component id="extra" paramlist="Document" condition="surround"/>
+		</uc:Template>
+		<uc:Template id="Doc" paramlist="Document"/>
+		<uc:Template id="DAWRemote" flags="public">
+			<uc:Component id="transport" paramlist="Transport"/>
+			<uc:Component id="mixer">
+				<uc:Component id="channel" paramlist="ChannelGroup">
+					<uc:foreach id="$i" min="1" max="3">
+						<uc:Component id="ch$i" template="Strip" paramlist="Channel"/>
+					</uc:foreach>
+				</uc:Component>
+			</uc:Component>
+			<uc:Component id="hw">
+				<uc:foreach id="$i" min="1" max="2">
+					<uc:Component id="ch$i">
+						<uc:foreach id="$i" min="1" max="2">
+							<uc:Component id="slot$i" paramlist="InsertSlot"/>
+						</uc:foreach>
+					</uc:Component>
+				</uc:foreach>
+			</uc:Component>
+			<uc:Component id="document" template="Doc"/>
+		</uc:Template>
+	</uc:Templates>
+</uc:ComponentModel>
