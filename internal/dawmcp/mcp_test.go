@@ -4,20 +4,32 @@ import (
 	"context"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/steveclarke/ucmix/internal/daw"
 )
 
 type fakeEngine struct {
+	mu  sync.Mutex
 	got []daw.Request
 	res daw.Result
 	err error
+	// do, when set, runs inside Do (after the request is recorded).
+	do func(daw.Request)
 }
 
 func (f *fakeEngine) Do(_ context.Context, req daw.Request) (daw.Result, error) {
+	f.mu.Lock()
 	f.got = append(f.got, req)
+	do := f.do
+	f.mu.Unlock()
+	if do != nil {
+		do(req)
+	}
 	return f.res, f.err
 }
 
@@ -179,4 +191,84 @@ func TestInstructionsCarryTheMixingWorkflow(t *testing.T) {
 			t.Errorf("instructions lack %q", want)
 		}
 	}
+}
+
+// MCP clients send tool calls in parallel and the SDK runs them at once.
+// Selection-based edits (add a track, then rename the selected one) must not
+// interleave, with or without ucdaw serve.
+func TestToolCallsReachStudioProOneAtATime(t *testing.T) {
+	var inside, most atomic.Int32
+	engine := &fakeEngine{res: daw.Result{Message: "Done."}}
+	engine.do = func(daw.Request) {
+		n := inside.Add(1)
+		for {
+			m := most.Load()
+			if n <= m || most.CompareAndSwap(m, n) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		inside.Add(-1)
+	}
+	cs := connect(t, engine)
+	calls := []*mcp.CallToolParams{
+		{Name: "add_track", Arguments: map[string]any{"name": "Guitar"}},
+		{Name: "add_insert", Arguments: map[string]any{"channel": "Guitar", "plugin": "Pro EQ"}},
+		{Name: "add_instrument", Arguments: map[string]any{"instrument": "Mai Tai"}},
+		{Name: "audio_edit", Arguments: map[string]any{"edit": "split", "track": "Guitar", "bar": 9}},
+		{Name: "section", Arguments: map[string]any{"action": "delete", "section": "Verse"}},
+		{Name: "get_song", Arguments: map[string]any{}},
+	}
+	var wg sync.WaitGroup
+	for _, c := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := cs.CallTool(context.Background(), c); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := most.Load(); got != 1 {
+		t.Errorf("%d calls ran at once, want 1", got)
+	}
+	if len(engine.got) != len(calls) {
+		t.Errorf("calls = %d, want %d", len(engine.got), len(calls))
+	}
+}
+
+// Stop must never wait behind a timed play, the way ucdaw serve exempts it.
+func TestStopDoesNotWaitBehindAPlay(t *testing.T) {
+	release := make(chan struct{})
+	playing := make(chan struct{})
+	engine := &fakeEngine{res: daw.Result{Message: "Done."}}
+	engine.do = func(req daw.Request) {
+		if req.Action == "play" {
+			close(playing)
+			<-release
+		}
+	}
+	cs := connect(t, engine)
+	played := make(chan struct{})
+	go func() {
+		defer close(played)
+		_, _ = cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "transport", Arguments: map[string]any{"action": "play", "seconds": 30}})
+	}()
+	<-playing
+	stopped := make(chan error, 1)
+	go func() {
+		_, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "transport", Arguments: map[string]any{"action": "stop"}})
+		stopped <- err
+	}()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("stop waited behind the play")
+	}
+	close(release)
+	<-played
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/steveclarke/ucmix/internal/daw"
@@ -440,10 +441,19 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 	return s
 }
 
+// work serializes requests across every tool call in this process. The SDK
+// runs tool calls concurrently, and without ucdaw serve nothing else stands
+// between them and Studio Pro.
+var work sync.Mutex
+
 func run(ctx context.Context, engine EngineFunc, req daw.Request, withData bool) (*mcp.CallToolResult, any, error) {
 	e, err := engine()
 	if err != nil {
 		return failure(err), nil, nil
+	}
+	if req.Exclusive() {
+		work.Lock()
+		defer work.Unlock()
 	}
 	res, err := e.Do(ctx, req)
 	if err != nil {

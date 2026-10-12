@@ -63,6 +63,15 @@ type Engine interface {
 	Do(ctx context.Context, req Request) (Result, error)
 }
 
+// Exclusive reports whether a request must run alone. Studio Pro edits act on
+// whatever is selected, so two requests interleaving can rename or edit the
+// wrong track; every caller that can run requests at once (ucdaw serve, the
+// MCP server) holds one lock around the exclusive ones. Stop is exempt so it
+// never waits behind a timed play.
+func (r Request) Exclusive() bool {
+	return r.Op != "transport" || r.Action != "stop"
+}
+
 // Problem is an error a musician can act on: what went wrong and what to do.
 type Problem struct {
 	Message string

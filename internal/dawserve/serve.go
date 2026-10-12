@@ -145,8 +145,7 @@ func (s *Server) Do(ctx context.Context, req daw.Request) (daw.Result, error) {
 	if err != nil {
 		return daw.Result{}, err
 	}
-	// Stop must never wait behind a timed play.
-	if req.Op != "transport" || req.Action != "stop" {
+	if req.Exclusive() {
 		s.work.Lock()
 		defer s.work.Unlock()
 	}
