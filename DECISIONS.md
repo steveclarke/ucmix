@@ -347,3 +347,27 @@ $ ucdaw fader Take -75         Take at -75 dB (was -inf dB).    console: -75.0
 ```
 
   Fader left at 0 dB; the console view was closed again.
+
+## Step 6: the full scene from a fresh `claude -p`
+
+- Prompt (the Brief's Saturday morning): "Set me up for a worship demo at 72 BPM with the click on. Give me a guitar track with Guitar Rig and a clean preset, and three backing tracks: pad, keys, bass. Then add sections Verse, Chorus, Bridge and repeat Chorus after the Bridge."
+- Run with only this MCP (`--strict-mcp-config`, `studio-pro-ucnet` = the installed `ucdaw mcp`), serve running. Transcripts in Hugo `personal/projects/talk-to-daw/research/round2-2026-10-12-scene-transcript.jsonl` (run 1) and `…-transcript-2.jsonl` (run 2).
+- **Run 1** (32 s): everything happened and was read back; tempo 72, Guitar with Guitar Rig 7, Pad (Syntronik 2), Keys (SampleTank 4), Bass (MODO BASS 2), sections Verse 1, Chorus 9, Bridge 17, Chorus 25. What read badly:
+  - `get_song` listed sections as clock times ("Chorus 0:27") at 72 bpm, while `section` spoke in bars. Fixed: the song summary now lists sections and markers by bar.
+  - "Studio Pro has no preset "Clean" for it" left Claude guessing how to make one. Fixed: missing-preset answers say what presets exist, or that none are saved and how to save one; new `list_presets` tool and `ucdaw presets`.
+- Run 1 undone with Undo (13 steps; tempo is not in Studio Pro's undo history, so it was set back to 120 by hand).
+- **Run 2** (60 s, 20 turns): Claude checked Guitar Rig's presets first (`list_presets` → none saved), built everything in parallel, and answered in Steve's shape:
+
+```
+TOOL tempo {"bpm": 72}                                           -> Tempo 72 bpm (was 120).
+TOOL click {"state": "on"}                                       -> Click is already on.
+TOOL add_track {"name": "Guitar", "plugin": "Guitar Rig 7"}      -> Added mono audio track Guitar; added Guitar Rig 7 to Guitar (insert 1).
+TOOL add_instrument {"instrument": "Syntronik 2", "name": "Pad"} -> Added instrument track Pad with Syntronik 2.
+TOOL add_instrument {"instrument": "SampleTank 4", "name": "Keys"} -> Added instrument track Keys with SampleTank 4.
+TOOL add_instrument {"instrument": "MODO BASS 2", "name": "Bass"} -> Added instrument track Bass with MODO BASS 2.
+TOOL section {"action": "add", "name": "Verse, Chorus, Bridge"}  -> Added sections Verse, Chorus and Bridge, 8 bars each; sections now: Verse bar 1, Chorus bar 9, Bridge bar 17.
+TOOL section {"action": "repeat", "section": "Chorus 1", "target": "Bridge"} -> Repeated Chorus after Bridge, at bar 25.
+SAY  Everything is set up except the clean guitar sound. Guitar Rig 7 is on the Guitar track but on its default sound, because no clean preset is saved in Studio Pro. To fix it, pick a clean sound in the Guitar Rig window, then save it from Studio Pro's preset menu at the top of that window. …
+```
+
+- Run 2's result is left in the throwaway song for Steve to see. The "Mojito" instrument and a "Bridge" marker at bar 1 in that song are leftovers of the night's tests.
