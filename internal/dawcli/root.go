@@ -106,6 +106,7 @@ func newRootCmd() *cobra.Command {
 		newInstrumentCmd(o),
 		newFavoriteCmd(o),
 		newPluginsCmd(o),
+		newPresetsCmd(o),
 		newServeCmd(o),
 		newMCPCmd(o),
 	)
@@ -625,4 +626,24 @@ func commandArgs(flags []string) (map[string]string, error) {
 		out[strings.TrimSpace(name)] = value
 	}
 	return out, nil
+}
+
+func newPresetsCmd(o *options) *cobra.Command {
+	return &cobra.Command{
+		Use:     "presets <plug-in> [filter]",
+		Short:   "List a plug-in's Studio Pro presets (the names --preset takes)",
+		Example: "  ucdaw presets \"Pro EQ\"\n  ucdaw presets \"Guitar Rig 7\" clean",
+		Args:    cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			filter := ""
+			if len(args) == 2 {
+				filter = args[1]
+			}
+			res, err := daw.Presets(args[0], filter)
+			if err != nil {
+				return err
+			}
+			return printResult(cmd.OutOrStdout(), o, res)
+		},
+	}
 }

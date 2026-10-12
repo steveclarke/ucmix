@@ -87,6 +87,11 @@ type instrumentIn struct {
 	Preset     string `json:"preset,omitempty" jsonschema:"optional Studio Pro preset for the instrument; a favorite brings its own"`
 }
 
+type presetsIn struct {
+	Plugin string `json:"plugin" jsonschema:"plug-in or instrument name as list_plugins shows it, or a favorite"`
+	Filter string `json:"filter,omitempty" jsonschema:"optional text the preset name must contain"`
+}
+
 type favoriteIn struct {
 	Action string `json:"action" jsonschema:"list, set or remove"`
 	Name   string `json:"name,omitempty" jsonschema:"set and remove: the musician's words for the sound, e.g. clean guitar or worship synth"`
@@ -216,9 +221,22 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "list_presets",
+		Description: "List a plug-in's or instrument's Studio Pro presets, the names add_insert, add_track and add_instrument take as preset. " +
+			"Sounds saved only inside a plug-in's own browser (Guitar Rig, Syntronik) are not Studio Pro presets until the musician saves them " +
+			"from the preset menu in the plug-in's window in Studio Pro.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in presetsIn) (*mcp.CallToolResult, any, error) {
+		res, err := daw.Presets(in.Plugin, in.Filter)
+		if err != nil {
+			return failure(err), nil, nil
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: res.Message}}}, nil, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "favorite",
 		Description: "The musician's favorite sounds: their words (\"clean guitar\", \"worship synth\") mapped to a plug-in and preset. " +
-			"list them; set one when they say \"remember this as my clean guitar\" (use the plug-in and preset just used); remove one. " +
+			"list them; set one when they say \"remember this as my clean guitar\" (use the plug-in and preset just used; the preset must be a Studio Pro preset, see list_presets); remove one. " +
 			"add_track, add_insert and add_instrument accept a favorite's name wherever they take a plug-in. Works without Studio Pro.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in favoriteIn) (*mcp.CallToolResult, any, error) {
 		res, err := daw.Favorites(daw.Request{Op: "favorite", Action: in.Action, Name: in.Name, Plugin: in.Plugin, Preset: in.Preset})

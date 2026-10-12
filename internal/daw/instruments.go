@@ -6,6 +6,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -150,7 +152,7 @@ func (st *Studio) addInstrument(ctx context.Context, req Request) (Result, error
 		case presetExists(p, presetArg):
 			msg += " (preset " + path.Base(presetArg) + " sent; Studio Pro did not report it back)"
 		default:
-			msg += fmt.Sprintf("; Studio Pro has no preset %q for it, so it has its default sound", preset)
+			msg += missingPreset(p, preset, "default sound")
 		}
 	}
 	if fav != nil {
@@ -260,4 +262,89 @@ func describeFavorite(f dawfav.Favorite) string {
 		s += " (instrument)"
 	}
 	return s
+}
+
+// maxPresetScan bounds how many files one preset lookup reads.
+const maxPresetScan = 5000
+
+// presetNames lists the Studio Pro presets saved for a plug-in, as the
+// relative names --preset takes ("Misc/50 Hz Removal"), sorted.
+func presetNames(p dawplugins.Plugin) []string {
+	seen := map[string]bool{}
+	var out []string
+	scanned := 0
+	for _, root := range presetRoots() {
+		for _, vendor := range []string{p.Vendor, "Fender", "PreSonus"} {
+			dir := filepath.Join(root, vendor, p.Name)
+			_ = filepath.WalkDir(dir, func(file string, d os.DirEntry, err error) error {
+				if err != nil {
+					return nil
+				}
+				if scanned++; scanned > maxPresetScan {
+					return filepath.SkipAll
+				}
+				if d.IsDir() || !strings.HasSuffix(d.Name(), ".preset") {
+					return nil
+				}
+				rel, err := filepath.Rel(dir, file)
+				if err != nil {
+					return nil
+				}
+				name := strings.TrimSuffix(filepath.ToSlash(rel), ".preset")
+				if !seen[name] {
+					seen[name] = true
+					out = append(out, name)
+				}
+				return nil
+			})
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// missingPreset explains a preset Studio Pro could not load, with what it
+// does have.
+func missingPreset(p dawplugins.Plugin, preset, fallback string) string {
+	names := presetNames(p)
+	msg := fmt.Sprintf("; Studio Pro has no preset %q for it, so it has its %s", preset, fallback)
+	switch {
+	case len(names) == 0:
+		msg += fmt.Sprintf(" (no %s sounds are saved as Studio Pro presets yet: save one from the preset menu in its window)", p.Name)
+	case len(names) <= 6:
+		msg += " (its presets: " + strings.Join(names, ", ") + ")"
+	default:
+		var close []string
+		want := strings.ToLower(path.Base(preset))
+		for _, n := range names {
+			if strings.Contains(strings.ToLower(n), want) && len(close) < 6 {
+				close = append(close, n)
+			}
+		}
+		if len(close) > 0 {
+			msg += " (close: " + strings.Join(close, ", ") + ")"
+		} else {
+			msg += fmt.Sprintf(" (%d presets; ucdaw presets %q lists them)", len(names), p.Name)
+		}
+	}
+	return msg
+}
+
+// Presets lists a plug-in's Studio Pro presets.
+func Presets(plugin, filter string) (Result, error) {
+	p, _, _, err := pickPlugin(plugin, "")
+	if err != nil {
+		return Result{}, err
+	}
+	var out []string
+	f := strings.ToLower(filter)
+	for _, n := range presetNames(p) {
+		if f == "" || strings.Contains(strings.ToLower(n), f) {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return Result{Message: fmt.Sprintf("%s has no Studio Pro presets saved%s; save one from the preset menu in its window.", p.Name, map[bool]string{true: "", false: " matching " + strconv.Quote(filter)}[filter == ""]), Data: out}, nil
+	}
+	return Result{Message: fmt.Sprintf("%d %s preset%s: %s.", len(out), p.Name, plural(float64(len(out))), strings.Join(out, ", ")), Data: out}, nil
 }

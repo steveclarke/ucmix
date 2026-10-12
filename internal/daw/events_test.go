@@ -72,7 +72,7 @@ func TestSongListsSectionsAndMarkers(t *testing.T) {
 	fake.mu.Unlock()
 	_ = st.session.WaitFor(context.Background(), func(m *Model) bool { return len(m.Events("Mark")) == 4 })
 	got := do(t, st, Request{Op: "song"})
-	want := "120 bpm, 4/4, click on, loop off, stopped; no tracks yet; sections: Start 0:00, #2 0:04, #3 0:08; markers: #2 0:04, #3 0:08."
+	want := "120 bpm, 4/4, click on, loop off, stopped; no tracks yet; sections: Start bar 1, section 2 bar 3, section 3 bar 5; markers: #2 bar 3, #3 bar 5."
 	if got != want {
 		t.Errorf("song = %q", got)
 	}

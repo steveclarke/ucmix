@@ -122,7 +122,7 @@ func TestEveryToolHasADescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 18 {
+	if len(tools.Tools) != 19 {
 		t.Errorf("tools = %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {

@@ -661,11 +661,11 @@ func (st *Studio) song() Result {
 	default:
 		msg += fmt.Sprintf("%d channel%s: %s", len(tracks), plural(float64(len(tracks))), strings.Join(tracks, ", "))
 	}
-	if len(song.Sections) > 0 {
-		msg += "; sections: " + eventSummary(song.Sections)
+	if sections := st.sectionList(); len(sections) > 0 {
+		msg += "; sections: " + sectionsSummary(sections)
 	}
 	if len(song.Markers) > 0 {
-		msg += "; markers: " + eventSummary(song.Markers)
+		msg += "; markers: " + st.markerSummary(song.Markers)
 	}
 	msg += "."
 	return Result{Message: msg, Data: song}
@@ -1010,4 +1010,21 @@ func lowerFirst(s string) string {
 		return s
 	}
 	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// markerSummary lists markers by bar when the tempo is known.
+func (st *Studio) markerSummary(markers []Event) string {
+	spb := st.secondsPerBar()
+	if spb <= 0 {
+		return eventSummary(markers)
+	}
+	parts := make([]string, len(markers))
+	for i, e := range markers {
+		name := e.Name
+		if name == "" {
+			name = fmt.Sprintf("#%d", i+1)
+		}
+		parts[i] = fmt.Sprintf("%s bar %s", name, trim(barAt(e.Start, spb)))
+	}
+	return strings.Join(parts, ", ")
 }

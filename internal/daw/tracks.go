@@ -156,7 +156,7 @@ func (st *Studio) insert(ctx context.Context, channel, plugin, preset string) (R
 	case strings.EqualFold(loaded, path.Base(presetArg)):
 		msg += fmt.Sprintf(" with preset %s", loaded)
 	default:
-		msg += fmt.Sprintf("; Studio Pro has no preset %q for it, so it has its default settings", preset)
+		msg += missingPreset(p, preset, "default settings")
 	}
 	if fav != nil {
 		msg += fmt.Sprintf(", from your favorite %q", fav.Name)

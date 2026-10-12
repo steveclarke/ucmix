@@ -155,3 +155,27 @@ func TestAddInstrumentRefusesEffects(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestMissingPresetNamesWhatExists(t *testing.T) {
+	useFixturePlugins(t)
+	dir := useTempFavorites(t)
+	p, _, _, err := pickPlugin("Amp Thing 7", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := missingPreset(p, "Clean", "default settings"); !strings.Contains(got, "no Amp Thing 7 sounds are saved as Studio Pro presets yet") {
+		t.Errorf("none = %q", got)
+	}
+	presetDir := filepath.Join(dir, "Presets", "Example Audio", "Amp Thing 7", "Clean")
+	_ = os.MkdirAll(presetDir, 0o700)
+	for _, n := range []string{"Sparkle", "Chime"} {
+		_ = os.WriteFile(filepath.Join(presetDir, n+".preset"), nil, 0o600)
+	}
+	if got := missingPreset(p, "Clean", "default settings"); !strings.HasSuffix(got, "(its presets: Clean/Chime, Clean/Sparkle)") {
+		t.Errorf("some = %q", got)
+	}
+	res, err := Presets("amp thing", "spark")
+	if err != nil || res.Message != "1 Amp Thing 7 preset: Clean/Sparkle." {
+		t.Errorf("Presets = %q, %v", res.Message, err)
+	}
+}
