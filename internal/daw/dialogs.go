@@ -30,10 +30,10 @@ func declineRank(label string) int {
 	if len(w) == 0 {
 		return -1
 	}
-	switch {
-	case w[0] == "cancel":
+	switch w[0] {
+	case "cancel":
 		return 0
-	case w[0] == "no":
+	case "no":
 		return 1
 	}
 	var rest []string
