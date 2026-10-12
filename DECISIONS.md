@@ -114,3 +114,18 @@ $ ucdaw command list "zoom full"
 - Live, with serve running: `state` 0.00 s, `click off` 0.04 s, `click on` 0.04 s, `transport play --for 1s` 1.17 s (three runs). One `play --bars 1` took 3.24 s: the first Stop was ignored and the retry stopped it.
 - The model stays current from Studio Pro's own updates: tempo set to 100 and a stereo track added over a separate `--direct` connection both showed up in serve's `tempo` and `state` at once (then undone, tempo back to 120).
 - **Untested live:** reconnect after Studio Pro restarts, because the brief forbids quitting Studio Pro. The code path is the same `Connect` the CLI uses; the background loop retries after `Done`.
+
+## Step 7: MCP (23:40 NDT)
+
+- `github.com/modelcontextprotocol/go-sdk` v1.8.0 resolved and works. `ucdaw mcp` serves 10 tools on stdio: `transport`, `click`, `tempo`, `get_song`, `get_values`, `get_param`, `set_param`, `list_params`, `list_commands`, `run_command`. Each call uses serve when it runs, direct otherwise. Problems come back as tool errors with "Next: <what to do>".
+- Registered at user scope: `claude mcp add --scope user studio-pro-ucnet -- /Users/steve/go/bin/ucdaw mcp` (binary from `go install ./cmd/ucdaw`). The existing `studio-pro` entry is untouched.
+- Proof from a fresh `claude -p` (serve running, click off beforehand), transcript in Hugo `personal/projects/talk-to-daw/research/overnight-2026-10-12-mcp-transcript.jsonl`:
+
+```
+TOOL click {"state": "on"}                         -> Click on.
+TOOL transport {"action": "play", "seconds": 2}    -> Played 2 s at 120 bpm, then stopped.
+TOOL tempo {}                                      -> Tempo is 120 bpm.
+SAY  The tempo is 120 bpm. The click is on, and the song played for two seconds then stopped.
+```
+
+  Whole `claude -p` run 26 s wall (model startup and thinking); the Studio Pro calls themselves take 0.04 s each plus the requested 2 s of playback.
