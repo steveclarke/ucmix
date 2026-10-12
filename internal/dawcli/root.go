@@ -150,13 +150,13 @@ func printRows(w io.Writer, data any) error {
 	for _, row := range rows {
 		switch {
 		case row["classId"] != nil:
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", cell(row["name"]), cell(row["vendor"]), cell(row["format"]))
+			_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\n", cell(row["name"]), cell(row["vendor"]), cell(row["format"]))
 		case row["category"] != nil:
-			fmt.Fprintf(tw, "  %s\t%s\n", cell(row["category"]), cell(row["name"]))
+			_, _ = fmt.Fprintf(tw, "  %s\t%s\n", cell(row["category"]), cell(row["name"]))
 		case row["pattern"] != nil:
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", cell(row["pattern"]), cell(row["type"]), cell(describeParam(row)))
+			_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\n", cell(row["pattern"]), cell(row["type"]), cell(describeParam(row)))
 		case row["value"] != nil:
-			fmt.Fprintf(tw, "  %s\t%s\n", cell(row["path"]), cell(row["value"]))
+			_, _ = fmt.Fprintf(tw, "  %s\t%s\n", cell(row["path"]), cell(row["value"]))
 		}
 	}
 	return tw.Flush()
@@ -213,7 +213,7 @@ func newDiscoverCmd(o *options) *cobra.Command {
 				return daw.NotFound
 			}
 			for _, e := range found {
-				fmt.Fprintln(cmd.OutOrStdout(), discoverLine(e))
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), discoverLine(e))
 			}
 			return nil
 		},
@@ -382,7 +382,7 @@ func newRecordCmd(o *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "record <file>",
 		Short: "Record everything Studio Pro sends after subscribing (raw frames, for protocol work)",
-		Long: "Records raw UCNET frames to <file>. The capture holds licence and song data:\n" +
+		Long: "Records raw UCNET frames to <file>. The capture holds license and song data:\n" +
 			"keep it out of public repositories.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -422,7 +422,7 @@ func newRecordCmd(o *options) *cobra.Command {
 	return cmd
 }
 
-// createCapture opens a capture file owner-only: captures hold licence and
+// createCapture opens a capture file owner-only: captures hold license and
 // song data. An existing file is tightened to 0600 as well.
 func createCapture(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
@@ -553,7 +553,7 @@ func newServeCmd(o *options) *cobra.Command {
 					return daw.Connect(ctx, daw.DefaultCacheFile(), o.host)
 				},
 				Log: func(format string, args ...any) {
-					fmt.Fprintln(logw, time.Now().Format("15:04:05")+" "+safe(fmt.Sprintf(format, args...)))
+					_, _ = fmt.Fprintln(logw, time.Now().Format("15:04:05")+" "+safe(fmt.Sprintf(format, args...)))
 				},
 			}
 			socket := o.socket
@@ -562,7 +562,7 @@ func newServeCmd(o *options) *cobra.Command {
 					return err
 				}
 			}
-			fmt.Fprintf(logw, "ucdaw serve listening on %s\n", socket)
+			_, _ = fmt.Fprintf(logw, "ucdaw serve listening on %s\n", socket)
 			return srv.Serve(cmd.Context(), socket)
 		},
 	}
@@ -583,16 +583,16 @@ func Execute() {
 
 func printError(w io.Writer, err error) {
 	if errors.Is(err, context.Canceled) {
-		fmt.Fprintln(w, "Interrupted.")
+		_, _ = fmt.Fprintln(w, "Interrupted.")
 		return
 	}
 	var p daw.Problem
 	if errors.As(err, &p) {
-		fmt.Fprintln(w, safe(p.Sentence()))
+		_, _ = fmt.Fprintln(w, safe(p.Sentence()))
 		if p.Hint != "" {
-			fmt.Fprintln(w, "  "+safe(p.Hint))
+			_, _ = fmt.Fprintln(w, "  "+safe(p.Hint))
 		}
 		return
 	}
-	fmt.Fprintln(w, "Error:", safe(err.Error()))
+	_, _ = fmt.Fprintln(w, "Error:", safe(err.Error()))
 }

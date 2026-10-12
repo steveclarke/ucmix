@@ -1,6 +1,6 @@
 // Package dawserve holds one Studio Pro session open and answers ucdaw
 // requests over a Unix socket, so each CLI or MCP call skips discovery, the
-// licence handshake and the snapshot. It reconnects when Studio Pro restarts.
+// license handshake and the snapshot. It reconnects when Studio Pro restarts.
 package dawserve
 
 import (
@@ -146,7 +146,7 @@ func (s *Server) Do(ctx context.Context, req daw.Request) (daw.Result, error) {
 		return daw.Result{}, err
 	}
 	// Stop must never wait behind a timed play.
-	if !(req.Op == "transport" && req.Action == "stop") {
+	if req.Op != "transport" || req.Action != "stop" {
 		s.work.Lock()
 		defer s.work.Unlock()
 	}
@@ -219,7 +219,7 @@ func (s *Server) closeSession() {
 const maxRequest = 64 << 10
 
 // handle answers one request per connection. The request runs under a
-// context cancelled when the client hangs up, so a client that gives up
+// context canceled when the client hangs up, so a client that gives up
 // (Ctrl-C during a timed play) ends the play, which then stops.
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()

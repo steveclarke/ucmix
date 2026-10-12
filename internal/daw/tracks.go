@@ -146,7 +146,7 @@ func (st *Studio) insert(ctx context.Context, channel, plugin, preset string) (R
 	cancel()
 	if d, open := st.model().Dialog(); open {
 		_ = st.session.DismissDialog(ctx)
-		return Result{}, Problem{Message: fmt.Sprintf("Studio Pro asked for choices (%q) instead of adding %s; cancelled it.", d.Title, p.Name)}
+		return Result{}, Problem{Message: fmt.Sprintf("Studio Pro asked for choices (%q) instead of adding %s; canceled it.", d.Title, p.Name)}
 	}
 	if err != nil {
 		return Result{}, st.unconfirmed(ErrUnconfirmed, "Adding "+p.Name)

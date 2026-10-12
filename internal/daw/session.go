@@ -72,7 +72,7 @@ func Dial(ctx context.Context, endpoint Endpoint) (*Session, error) {
 }
 
 // DialTap is Dial with tap called on every inbound frame, from the first
-// licence reply on (for recording).
+// license reply on (for recording).
 func DialTap(ctx context.Context, endpoint Endpoint, tap func(proto.Frame)) (*Session, error) {
 	metering, err := listenMetering()
 	if err != nil {
@@ -127,7 +127,7 @@ func (s *Session) handshake(ctx context.Context) error {
 		return fmt.Errorf("daw: sending license query: %w", err)
 	}
 	if err := s.waitJM(ctx, "UserLicenseReply"); err != nil {
-		return fmt.Errorf("daw: waiting for Studio Pro's licence reply: %w", err)
+		return fmt.Errorf("daw: waiting for Studio Pro's license reply: %w", err)
 	}
 	local, ok := s.metering.LocalAddr().(*net.UDPAddr)
 	if !ok || local.Port <= 0 || local.Port > 65535 {

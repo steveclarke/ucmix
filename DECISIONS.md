@@ -205,3 +205,5 @@ A review agent read the whole branch. Fixed, each with a test where it can be te
 - Change reports matched channels by path, so deleting one channel misreported the renumbered ones: now matched by name and kind.
 - Unchanged values counted as changes; NaN reached Studio Pro; negative play lengths meant endless play; two plug-ins with the same name from different vendors were silently merged; a test race in dawserve. All fixed.
 - Not changed: writes in the shared `internal/transport` have no deadline (mixer code path, left alone). Studio Pro selection is exclusive (checked live), so inserting never hits other channels.
+- Live: `ucdaw transport play --for 8s` through serve, interrupted with Ctrl-C after 1.5 s: the client printed "Interrupted." and Studio Pro reported `transport/start off` straight after.
+- `golangci-lint run`: 0 issues; `just test`: 698 tests pass.

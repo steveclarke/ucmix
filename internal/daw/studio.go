@@ -701,7 +701,7 @@ func (st *Studio) run(ctx context.Context, category, name string, args map[strin
 			}
 		}
 		return Result{}, Problem{
-			Message: fmt.Sprintf("%s opened the %q dialog, which needs choices ucdaw cannot make; cancelled it.", full, d.Title),
+			Message: fmt.Sprintf("%s opened the %q dialog, which needs choices ucdaw cannot make; canceled it.", full, d.Title),
 			Hint:    "pass the command's arguments, or use a command that needs no dialog",
 		}
 	}

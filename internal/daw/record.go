@@ -14,7 +14,7 @@ import (
 //
 //	[ms since start u32 LE][length u32 LE][code 2][connID 4][payload]
 //
-// where length covers code, connID and payload. Captures hold licence and
+// where length covers code, connID and payload. Captures hold license and
 // song data: keep them out of public repositories.
 type Recorder struct {
 	mu     sync.Mutex
