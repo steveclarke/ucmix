@@ -180,7 +180,8 @@ If a command opens a dialog (it needs choices), ucdaw presses its Cancel (or
 No, Don't…) button at once and says so, so Studio Pro is not left blocked. It
 never chooses for the musician: a dialog with no such button (Save / Don't Save,
 Yes / OK) stays open and the answer names it and its buttons; ask the musician
-to answer it in Studio Pro.
+to answer it in Studio Pro. A dialog about saving, discarding, deleting,
+removing, overwriting or closing is never answered by ucdaw, even with Cancel.
 
 ## Parameters by path
 

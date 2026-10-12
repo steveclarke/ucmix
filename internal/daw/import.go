@@ -296,7 +296,7 @@ func (st *Studio) answerImportDialog(ctx context.Context, d Dialog) (string, err
 	// The first button that says yes to converting, never one that turns it
 	// down: "Don't Convert" holds "convert" too.
 	button := -1
-	if conversion {
+	if conversion && !losesWork(d) {
 		for i, b := range d.Buttons {
 			if !negativeLabel(b) && hasWord(b, "convert", "ok", "yes", "import", "apply", "continue") {
 				button = i

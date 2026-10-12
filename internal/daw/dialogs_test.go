@@ -217,3 +217,64 @@ func TestDismissSaysWhenTheDialogClosedByItself(t *testing.T) {
 		t.Errorf("message = %q", p.Message)
 	}
 }
+
+// A dialog about saving, discarding, deleting, removing, overwriting or
+// closing is never answered by ucdaw, whatever its buttons: "No" on "Save
+// changes?" throws the work away.
+func TestDismissNeverAnswersADialogThatCouldLoseWork(t *testing.T) {
+	tests := []struct{ title, text, first, second string }{
+		{"Save Changes", "", "Yes", "No"},
+		{"Studio Pro", "Do you want to save the song before closing?", "Cancel", "No"},
+		{"Discard", "", "Cancel", "OK"},
+		{"Delete Track", "", "Cancel", "Delete"},
+		{"Remove Files", "", "No", "Yes"},
+		{"Overwrite?", "", "Don't Overwrite", "Overwrite"},
+		{"Close Session", "", "OK", ""},
+		{"Warning", "The file was deleted.", "OK", ""},
+		{"Cleanup", "Removing unused audio, deleting history.", "Cancel", "Continue"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.title, func(t *testing.T) {
+			fake := newFake(t)
+			s := dialFake(t, fake)
+			fake.mu.Lock()
+			fake.frames <- zm(t, fmt.Sprintf(`{"id": "BeginDialog","dialogType": 1,"dialogText": %q,"dialogTitle": %q,"firstButton": %q,"secondButton": %q}`, tt.text, tt.title, tt.first, tt.second))
+			fake.onConfirm = []proto.Frame{zm(t, `{"id": "EndDialog"}`)}
+			fake.mu.Unlock()
+			_ = s.WaitFor(context.Background(), func(m *Model) bool { _, open := m.Dialog(); return open })
+			_, err := s.DismissDialog(context.Background())
+			var p Problem
+			if !errors.As(err, &p) || !strings.Contains(p.Message, fmt.Sprintf("%q", tt.title)) || p.Hint != "answer it in Studio Pro" {
+				t.Errorf("err = %v", err)
+			}
+			if !strings.Contains(p.Message, tt.first) {
+				t.Errorf("message %q does not name %q", p.Message, tt.first)
+			}
+			if sent := confirms(fake); len(sent) != 0 {
+				t.Errorf("pressed %v", sent)
+			}
+		})
+	}
+}
+
+func TestImportNeverAnswersAConversionThatOverwrites(t *testing.T) {
+	r := newImportRig(t)
+	dir := stemFolder(t)
+	r.fake.mu.Lock()
+	r.fake.onConfirm = []proto.Frame{zm(t, `{"id": "EndDialog"}`)}
+	r.fake.mu.Unlock()
+	r.onOpen = func(path string) {
+		r.fake.frames <- zm(t, `{"id": "BeginDialog","dialogType": 1,"dialogText": "Convert and overwrite the existing file?","dialogTitle": "Convert Audio Files","firstButton": "Cancel","secondButton": "Convert"}`)
+		_ = r.st.session.WaitFor(context.Background(), func(m *Model) bool { _, open := m.Dialog(); return open })
+		a, _ := ReadAudioFile(path)
+		_ = os.WriteFile(filepath.Join(r.peaks, "x1"+peakSuffix(a)), nil, 0o600)
+	}
+	_, err := r.st.Do(context.Background(), Request{Op: "import", Files: []string{filepath.Join(dir, "03-Pad (Stereo) v2.wav")}})
+	var p Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "left it open") {
+		t.Errorf("err = %v", err)
+	}
+	if sent := confirms(r.fake); len(sent) != 0 {
+		t.Errorf("pressed %v", sent)
+	}
+}

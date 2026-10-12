@@ -95,6 +95,9 @@ func labeled(d Dialog) []int {
 // the musician: the plainest Cancel/No/Don't button, or the only button of a
 // one-button alert. ok is false when there is none.
 func declineButton(d Dialog) (int, bool) {
+	if losesWork(d) {
+		return -1, false
+	}
 	if l := labeled(d); len(l) == 1 {
 		return l[0], true
 	}
@@ -105,6 +108,25 @@ func declineButton(d Dialog) (int, bool) {
 		}
 	}
 	return best, best >= 0
+}
+
+// riskyWords mark a dialog about losing work. ucdaw never answers one, even
+// with Cancel or No: on "Save changes before closing?" No throws the work
+// away, and labels alone cannot tell which button keeps it.
+var riskyWords = []string{"save", "saving", "discard", "delet", "remov", "overwrit", "clos"}
+
+// losesWork reports whether a dialog's title or text mentions saving,
+// discarding, deleting, removing, overwriting or closing, in any form
+// ("Save", "saving", "deleted", "overwrite").
+func losesWork(d Dialog) bool {
+	for _, w := range labelWords(d.Title + " " + d.Text) {
+		for _, r := range riskyWords {
+			if strings.HasPrefix(w, r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // buttonList names a dialog's buttons for a musician: "Save" and "Don't Save".
@@ -124,10 +146,11 @@ func buttonList(d Dialog) string {
 
 // leftOpen is the Problem for a dialog ucdaw will not answer.
 func leftOpen(d Dialog) Problem {
-	return Problem{
-		Message: fmt.Sprintf("the %q dialog is open with %s, and none of them just cancels it, so ucdaw left it open", d.Title, buttonList(d)),
-		Hint:    "answer it in Studio Pro",
+	reason := fmt.Sprintf("the %q dialog has %s, none of which just cancels it, so ucdaw left it open", d.Title, buttonList(d))
+	if losesWork(d) {
+		reason = fmt.Sprintf("the %q dialog (%s) could lose work, so ucdaw left it open", d.Title, buttonList(d))
 	}
+	return Problem{Message: reason, Hint: "answer it in Studio Pro"}
 }
 
 // dismiss closes a dialog ucdaw cannot answer and returns the Problem that
@@ -142,10 +165,7 @@ func (st *Studio) dismiss(ctx context.Context, d Dialog, what, hint string) Prob
 	case err == nil:
 		return Problem{Message: fmt.Sprintf("%s; ucdaw closed it with %q", what, label), Hint: hint}
 	case errors.As(err, &p):
-		return Problem{
-			Message: fmt.Sprintf("%s; it has %s, none of which just cancels it, so ucdaw left it open", what, buttonList(d)),
-			Hint:    p.Hint,
-		}
+		return Problem{Message: what + "; " + p.Message, Hint: p.Hint}
 	}
 	return Problem{Message: what + "; ucdaw could not close it", Hint: "close it in Studio Pro"}
 }

@@ -102,11 +102,11 @@ func TestNewSongCancelsAnotherDialog(t *testing.T) {
 	fake.mu.Unlock()
 	_, err := st.Do(context.Background(), Request{Op: "new_song"})
 	var p Problem
-	if !errors.As(err, &p) || !strings.Contains(p.Message, `"Save Changes"`) || !strings.Contains(p.Message, `closed it with "Cancel"`) {
+	if !errors.As(err, &p) || !strings.Contains(p.Message, `"Save Changes"`) || !strings.Contains(p.Message, "left it open") {
 		t.Errorf("err = %v", err)
 	}
-	if got := lastConfirm(fake); got != `{"id": "ConfirmDialog","dialogResult": 1}` {
-		t.Errorf("pressed %s, want Cancel (1)", got)
+	if got := lastConfirm(fake); got != "" {
+		t.Errorf("pressed %s on a Save Changes dialog", got)
 	}
 	if title, _ := st.model().Str("document/title"); title != "Old Song" {
 		t.Errorf("title = %q", title)
