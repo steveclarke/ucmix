@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -258,5 +260,55 @@ func TestMultiLineAnswersPrintLineByLine(t *testing.T) {
 	}
 	if out != "Measured 2 stems:\nBass?[31m: average -40 dBFS.\nLoops is silent.\n" {
 		t.Errorf("out = %q", out)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	out, err := execute(t, &fakeEngine{}, "--version")
+	if err != nil || strings.TrimSpace(out) != "ucdaw version "+version {
+		t.Errorf("--version = %q, %v", out, err)
+	}
+}
+
+// homeWithTrackPreset points HOME at a temp dir holding one track preset.
+func homeWithTrackPreset(t *testing.T, name string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	file := filepath.Join(home, "Documents", "Studio One", "Presets", "User Presets", "Track Presets", filepath.FromSlash(name)+".trackpreset")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTrackPresetLoadResolvesTheNameFirst(t *testing.T) {
+	homeWithTrackPreset(t, "Mine/Album/Bass")
+	engine := &fakeEngine{res: daw.Result{Message: "ok"}}
+	if _, err := execute(t, engine, "trackpreset", "load", "Mine/Album/Bass"); err != nil {
+		t.Fatal(err)
+	}
+	want := []daw.Request{{Op: "load_track_preset", Name: "Mine/Album/Bass"}}
+	if !reflect.DeepEqual(engine.got, want) {
+		t.Errorf("got %+v", engine.got)
+	}
+	engine.got = nil
+	_, err := execute(t, engine, "trackpreset", "load", "Mine/Album/No Such Preset")
+	var p daw.Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "no track preset called") {
+		t.Errorf("err = %v", err)
+	}
+	if len(engine.got) != 0 {
+		t.Errorf("a missing preset reached the engine: %+v", engine.got)
+	}
+}
+
+func TestTrackPresetList(t *testing.T) {
+	homeWithTrackPreset(t, "Mine/Album/Bass")
+	out, err := execute(t, &fakeEngine{}, "trackpreset", "list", "mine/album")
+	if err != nil || strings.TrimSpace(out) != "1 track preset: Mine/Album/Bass." {
+		t.Errorf("list = %q, %v", out, err)
 	}
 }

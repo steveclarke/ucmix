@@ -276,7 +276,8 @@ Commands: `discover`, `state [prefix]`, `state record <file>`, `song new [--temp
 `instrument add`, `section list|add|duplicate|repeat|move|delete|rename|goto|play`,
 `audio fade-out|fade-in|split|trim-start|trim-end|crossfade|quantize`,
 `fader`, `trim`, `analyze [file|folder|track]... [--target dBFS]`, `gainstage [track]... [--target dBFS]`,
-`import <file|folder>... [--onto track] [--at bar]`, `favorite set|list|remove`, `plugins`, `presets`, `param get|set`,
+`import <file|folder>... [--onto track] [--at bar]`, `favorite set|list|remove`, `plugins`, `presets`,
+`trackpreset list|load`, `param get|set`,
 `params`, `command list|run [--arg name=value]`, `serve`, `mcp`.
 Every command takes `--json`.
 

@@ -46,6 +46,8 @@ ucdaw instrument add "Syntronik 2" --name Pad [--preset P]  # instrument track, 
 ucdaw fader Pad -6 | --down 3 | --up 2                      # dB, on Studio Pro's own curve
 ucdaw plugins rig                    # installed effects and instruments
 ucdaw presets "Pro EQ" [filter]      # a plug-in's Studio Pro presets
+ucdaw trackpreset list [filter]      # saved track presets (a track or a group, with plug-ins)
+ucdaw trackpreset load "Album/Bass"  # load one; reports the channels it added
 ucdaw state                          # song summary; `ucdaw state mixer/channel/ch1` for every value
 ```
 
@@ -202,7 +204,7 @@ dB for faders, sends and cue mixes, list entries by name.
 
 `get_song`, `new_song` (tempo, click), `analyze_audio`, `trim`, `gain_stage`, `transport`, `click`, `tempo`, `add_track`, `add_insert`,
 `add_instrument`, `import_audio`, `section`, `audio_edit`, `fader`, `favorite`,
-`list_plugins`, `list_presets`, `get_values`, `get_param`, `set_param`,
+`list_plugins`, `list_presets`, `list_track_presets`, `load_track_preset`, `get_values`, `get_param`, `set_param`,
 `list_params`, `list_commands`, `run_command` (with `args`). Start with
 `get_song`. Undo is `run_command` Edit / Undo.
 

@@ -121,6 +121,14 @@ type presetsIn struct {
 	Filter string `json:"filter,omitempty" jsonschema:"optional text the preset name must contain"`
 }
 
+type trackPresetsIn struct {
+	Filter string `json:"filter,omitempty" jsonschema:"optional text the track preset name must contain"`
+}
+
+type loadTrackPresetIn struct {
+	Name string `json:"name" jsonschema:"track preset as list_track_presets shows it, or the end of one: its own name (Bass) when only one has it, otherwise with its folder (Album/Bass)"`
+}
+
 type favoriteIn struct {
 	Action string `json:"action" jsonschema:"list, set or remove"`
 	Name   string `json:"name,omitempty" jsonschema:"set and remove: the musician's words for the sound, e.g. clean guitar or worship synth"`
@@ -297,6 +305,30 @@ func NewServer(engine EngineFunc, version string) *mcp.Server {
 			return failure(err), nil, nil
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: res.Message}}}, nil, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "list_track_presets",
+		Description: "List the musician's saved track presets, the names load_track_preset takes. A track preset is a track or a whole group " +
+			"(a drum kit with its buses, a bass chain) saved with its plug-ins and levels. Works without Studio Pro.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in trackPresetsIn) (*mcp.CallToolResult, any, error) {
+		res, err := daw.TrackPresets(in.Filter)
+		if err != nil {
+			return failure(err), nil, nil
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: res.Message}}}, nil, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "load_track_preset",
+		Description: "Load one of the musician's saved track presets into the song and report the channels it added. " +
+			"Many presets share a name (Bass, Drums) in different folders; when the answer lists several, ask which or use the folder they named.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in loadTrackPresetIn) (*mcp.CallToolResult, any, error) {
+		name, err := daw.PickTrackPreset(in.Name)
+		if err != nil {
+			return failure(err), nil, nil
+		}
+		return call(ctx, daw.Request{Op: "load_track_preset", Name: name}, false)
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

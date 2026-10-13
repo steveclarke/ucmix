@@ -81,6 +81,7 @@ func newRootCmd() *cobra.Command {
 			"Unofficial; not affiliated with or endorsed by Fender or PreSonus.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Version:       version,
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
 	flags := root.PersistentFlags()
@@ -112,6 +113,7 @@ func newRootCmd() *cobra.Command {
 		newFavoriteCmd(o),
 		newPluginsCmd(o),
 		newPresetsCmd(o),
+		newTrackPresetCmd(o),
 		newServeCmd(o),
 		newMCPCmd(o),
 	)

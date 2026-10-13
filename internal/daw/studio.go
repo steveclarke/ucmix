@@ -152,6 +152,10 @@ func (st *Studio) Do(ctx context.Context, req Request) (Result, error) {
 		return st.insert(ctx, req.Path, req.Name, req.Value)
 	case "plugins":
 		return Plugins(req.Filter)
+	case "track_presets":
+		return TrackPresets(req.Filter)
+	case "load_track_preset":
+		return st.loadTrackPreset(ctx, req.Name)
 	case "section":
 		return st.section(ctx, req)
 	case "audio":

@@ -2,6 +2,8 @@ package dawmcp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -148,7 +150,7 @@ func TestEveryToolHasADescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 24 {
+	if len(tools.Tools) != 26 {
 		t.Errorf("tools = %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
@@ -271,4 +273,37 @@ func TestStopDoesNotWaitBehindAPlay(t *testing.T) {
 	}
 	close(release)
 	<-played
+}
+
+func TestTrackPresetTools(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	file := filepath.Join(home, "Documents", "Studio One", "Presets", "User Presets", "Track Presets", "Mine", "Album", "Bass.trackpreset")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	engine := &fakeEngine{res: daw.Result{Message: "loaded"}}
+	cs := connect(t, engine)
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_track_presets", Arguments: map[string]any{"filter": "mine/album"}})
+	if err != nil || text(t, res) != "1 track preset: Mine/Album/Bass." {
+		t.Errorf("list = %v, %v", res, err)
+	}
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "load_track_preset", Arguments: map[string]any{"name": "Mine/Album/Bass"}})
+	if err != nil || res.IsError || text(t, res) != "loaded" {
+		t.Errorf("load = %v, %v", res, err)
+	}
+	want := []daw.Request{{Op: "load_track_preset", Name: "Mine/Album/Bass"}}
+	if !reflect.DeepEqual(engine.got, want) {
+		t.Errorf("got %+v", engine.got)
+	}
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "load_track_preset", Arguments: map[string]any{"name": "Mine/Album/No Such Preset"}})
+	if err != nil || !res.IsError || !strings.Contains(text(t, res), "No track preset called") {
+		t.Errorf("missing = %v, %v", res, err)
+	}
+	if len(engine.got) != 1 {
+		t.Errorf("a missing preset reached the engine: %+v", engine.got)
+	}
 }
